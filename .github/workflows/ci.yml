@@ -1,0 +1,74 @@
+name: SmartCancy CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: smartcancy
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d smartcancy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: smartcancy
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_POOL_MAX: 5
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Type-check frontend
+        run: npm run lint
+      - name: Build frontend
+        run: npm run build
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Check backend syntax
+        working-directory: backend
+        run: |
+          node --check src/server.js
+          node --check src/routes/approvals.js
+          node --check src/routes/cancellations.js
+          node --check src/routes/executions.js
+          node --check src/routes/recovery.js
+          node --check src/routes/reports.js
+      - name: Initialize isolated CI database
+        run: psql "postgresql://postgres:postgres@127.0.0.1:5432/smartcancy" -v ON_ERROR_STOP=1 -f database/schema.sql
+      - name: Run API smoke tests
+        working-directory: backend
+        shell: bash
+        run: |
+          node src/server.js > /tmp/smartcancy-api.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:8000/api/health/live >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --show-error --fail http://127.0.0.1:8000/api/health/live
+          node --test test/*.test.js
