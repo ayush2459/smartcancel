@@ -1,230 +1,157 @@
-# Smart Cancel 📦⚡
+# SmartCancy — cancellation recovery and sustainable logistics
 
-> **Turning Cancelled Orders into Useful Deliveries**  
-> *AWS Hackathon Project | Sustainable Logistics & Reverse Fulfillment Innovation*  
-> **Made by Team for AWS Hackathon**
+SmartCancy is a prototype for reducing waste when orders are cancelled late. The repository includes an interactive React/Vite simulator and a separate PostgreSQL-backed Express API for cancellation intake, recovery recommendations, human approval, simulated execution, and reports.
 
----
+> **Prototype boundary:** the frontend currently includes local demo data. The backend uses deterministic rule-based recommendations and illustrative estimates. Execution is simulation-only: it does not dispatch riders, reprint labels, refund payments, mutate live orders/parcels, or establish verified savings. Figures in the concept material are projections, not measured results.
 
-## 🏆 Project Overview
+## Repository layout
 
-When a customer cancels an online delivery late (after an order is packed, in linehaul transit, or loaded onto a last-mile delivery van), the package keeps moving. Traditional reverse logistics treats a cancellation as a **failed delivery**: the parcel is driven back, unloaded at a regional fulfillment center, unboxed, inspected, restocked, and re-shelved days later.
+- `src/` — React + TypeScript + Vite interactive frontend and demo data.
+- `backend/` — Express API and PostgreSQL routes.
+- `database/schema.sql` — schema-only bootstrap for a fresh SmartCancy database (16 tables, enums, indexes, triggers; no seed/customer data).
+- `.github/workflows/ci.yml` — CI build, type-check, schema bootstrap and API smoke tests.
 
-**Smart Cancel treats late cancellation as a logistics optimization decision.**
+## Prerequisites
 
-> *"We do not stop people from cancelling. We make cancelling cheaper for everyone: first with honest information, then with local re-matching."*
+- Node.js 22 LTS recommended (Node 20.19+ works with current Vite).
+- npm and Git.
+- PostgreSQL 16+ (local install or Docker).
 
-The customer keeps the unconditional right to cancel with 1-tap simplicity and zero penalties, while the logistics network saves up to **85% of return travel**, eliminates unnecessary carton waste, and delivers parcels same-day to nearby customers who want them.
+## Quick start on macOS
 
----
+### 1. Clone and install
 
-## 👥 Credits
-
-**Made by Team for AWS Hackathon**  
-- **Track**: Logistics Optimization, Cloud Architecture & Environmental Sustainability  
-- **Submission Type**: Working Interactive Full-Stack Prototype & Simulation Engine  
-- **Core Principle**: Anti-Dark Pattern UX with Algorithmic Re-Dispatch
-
----
-
-## 💡 The Two-Layer Architecture
-
-Smart Cancel operates across two complementary layers:
-
-```
-                          ┌──────────────────────────┐
-                          │   Customer taps Cancel   │
-                          └─────────────┬────────────┘
-                                        │
-                         Check Irreversibility Score
-                                        │
-             ┌──────────────────────────┴──────────────────────────┐
-             ▼ (Score 0–50: Ordered/Packed)                        ▼ (Score 51–100: Transit/Last Mile)
-┌──────────────────────────┐                              ┌──────────────────────────┐
-│   Early Cancel Stopped   │                              │  Layer 1: Honest Nudge   │
-│   (Zero transport cost)  │                              │  (Real CO2, KM, carton)  │
-└──────────────────────────┘                              └─────────────┬────────────┘
-                                                                        │
-                                                            Customer Decision?
-                                                                        │
-                                              ┌─────────────────────────┴─────────────────────────┐
-                                              ▼ Kept Order                                        ▼ Cancelled Anyway
-                                 ┌──────────────────────────┐                        ┌──────────────────────────┐
-                                 │   Order Continues Run    │                        │  Layer 2: Local Re-Match │
-                                 │      (Nudge worked!)     │                        │  (Check Seal & Demand)   │
-                                 └──────────────────────────┘                        └─────────────┬────────────┘
-                                                                                                   │
-                                                                                    Eligible & High Demand?
-                                                                                                   │
-                                                                        ┌──────────────────────────┴──────────────────────────┐
-                                                                        ▼ Yes                                                 ▼ No
-                                                           ┌──────────────────────────┐                          ┌──────────────────────────┐
-                                                           │  Hold at Local Station   │                          │ Normal Warehouse Return  │
-                                                           │  Match & Local Dispatch  │                          │      (Safe Fallback)     │
-                                                           └──────────────────────────┘                          └──────────────────────────┘
-```
-
-### Layer 1: Honest Impact Nudge (Pre-Cancellation)
-When a customer requests cancellation for an order that is already in transit or out for delivery, Smart Cancel presents an **Honest Impact Card**:
-- **Real calculated numbers**: Distance diverted (e.g. `~12.4 km`), estimated carbon emissions (e.g. `~0.42 kg CO₂`), and physical packaging consumed.
-- **Zero dark patterns**: The "Cancel anyway" button is of equal visual prominence and size as "Keep my order".
-- **No guilt phrasing or artificial countdown timers**. Cancellation is always one tap away with an instant refund guarantee.
-
-### Layer 2: Local Hub Re-Match (Post-Cancellation)
-If the customer proceeds with cancellation:
-1. The parcel is diverted to the nearest **Local Delivery Station / Hub** rather than routed all the way back to the primary Fulfillment Center.
-2. An automated optical barcode and seal integrity scan verifies that the carton remains unopened.
-3. The parcel is held in a local staging rack backed by an **AWS ElastiCache (Redis) TTL hold timer (max 72 hours)**.
-4. If a matching customer order arrives in the same or adjacent pincode cluster, the parcel's shipping label is automatically reprinted and re-dispatched.
-5. If no match occurs within the hold TTL, the parcel is batched with scheduled linehaul freight back to the warehouse (ensuring performance is never worse than today's baseline).
-
----
-
-## 📊 Fulfillment Irreversibility Score (0 to 100)
-
-The **Fulfillment Irreversibility Score** quantifies how costly and wasteful a cancellation is at any given point in the order lifecycle:
-
-| Level | Fulfillment Stage | Score Range | Operational Meaning | Action Taken |
-| :--- | :--- | :--- | :--- | :--- |
-| **Level 1** | **Ordered** | `0 – 25` | Easy to stop; no linehaul fuel or driver assignment | Stop order immediately; zero reverse cost |
-| **Level 2** | **Picked / Packed** | `26 – 50` | Physical box, thermal label, and tape consumed | Stop before dock load; restock locally |
-| **Level 3** | **In Transit** | `51 – 75` | Linehaul freight fuel spent; hub scan recorded | Show honest impact nudge; intercept at delivery station |
-| **Level 4** | **Last Mile** | `76 – 100` | Driver assigned; package loaded on van | Show honest impact nudge; hold at local station for re-match |
-
-$$\text{Irreversibility Score} = S_{\text{base}} + P_{\text{carton}} + \min\left(10, \lfloor d \times 0.15 \rfloor\right) + D_{\text{assigned}}$$
-
-Where:
-- $S_{\text{base}} \in \{12, 38, 64, 88\}$
-- $P_{\text{carton}}$ is packaging penalty (Mailer: `0`, Standard box: `+4`, Heavy carton: `+9`)
-- $d$ is distance traveled from fulfillment center in kilometers
-- $D_{\text{assigned}} = 6$ if van driver is dispatched on active route
-
----
-
-## 🛡️ Eligibility Matrix: Which Parcels Qualify?
-
-To preserve customer trust, security, and quality control, strict eligibility rules govern which cancelled parcels can be held for re-matching:
-
-### ✅ Eligible Items
-- **Sealed, unopened parcels**: Original tape and tamper-evident seals intact.
-- **Non-perishable shelf goods**: Shelf-stable items requiring no temperature monitoring.
-- **High-demand velocity categories**: Consumer electronics, Kindle devices, books, cables, phone accessories, and household staples.
-
-### ❌ Ineligible Items (Automatic Return Fallback)
-- **Perishables & fresh groceries**: Fresh produce, cold-chain dairy, or frozen foods.
-- **Personalized or customized goods**: Engraved hardware or custom-printed products.
-- **Hygiene & personal care**: Intimate apparel, opened cosmetics, test kits.
-- **Tampered or damaged packaging**: Any parcel with broken tape, tears, or transit crushed edges.
-- **Size-specific fashion**: Footwear and fitted apparel (unless an exact identical SKU/size match exists concurrently in the local station queue).
-
----
-
-## ☁️ AWS Cloud Architecture
-
-Smart Cancel is designed natively for AWS services to achieve low-latency event processing and high availability:
-
-```
- [ Customer Client ]
-   React / Next.js
-          │ (HTTPS)
-          ▼
- [ Amazon API Gateway ]
-          │
-          ▼
- [ AWS Lambda / Amazon ECS ] ─── (API Handlers & Decision Engine)
-          │
-    ┌─────┴──────────────────────────────┬──────────────────────────────┐
-    ▼                                    ▼                              ▼
-[ Amazon DynamoDB / RDS ]     [ Amazon ElastiCache (Redis) ]    [ Amazon Kinesis Data Streams ]
-(Orders, Parcels, Events)      (72h TTL Hold Station Timers)    (Real-Time Scanner Telemetry)
-                                                                        │
-                                                                        ▼
-                                                             [ Amazon CloudWatch ]
-                                                              (Station Metrics & Grafana)
-```
-
-| AWS Service | Role in Smart Cancel |
-| :--- | :--- |
-| **AWS Lambda & ECS** | Executes serverless decision routing, emission calculations, and A/B test assignment. |
-| **Amazon ElastiCache (Redis)** | Manages 72-hour TTL expiration keys for station holding racks and fast pincode lookup. |
-| **Amazon RDS (PostgreSQL) / DynamoDB** | Persists normalized orders, parcels, cancel events, and re-match records. |
-| **Amazon Kinesis Data Streams** | Ingests high-throughput optical barcode scans and stage transitions from station handhelds. |
-| **Amazon S3** | Archives optical seal photos captured during station intake inspections. |
-| **Amazon CloudWatch** | Monitors station rack saturation rates, hold times, and reverse trip reduction telemetry. |
-
----
-
-## 🗄️ Relational Data Model (6 Tables)
-
-The system relies on six normalized tables for tracking parcels and cancellation events:
-
-1. **`ORDER`**: `order_id (PK)`, `customer_id`, `product_id`, `payment_mode`, `placed_at`
-2. **`PARCEL`**: `parcel_id (PK)`, `order_id (FK)`, `stage`, `irreversibility_score`, `current_location`
-3. **`HUB`**: `hub_id (PK)`, `pincode`, `capacity`, `free_slots`
-4. **`CANCEL_EVENT`**: `cancel_id (PK)`, `order_id (FK)`, `stage_at_cancel`, `nudge_shown`, `kept_order`
-5. **`REMATCH`**: `rematch_id (PK)`, `parcel_id (FK)`, `new_order_id (FK)`, `hold_hours`, `km_saved`
-6. **`DEMAND_SIGNAL`**: `pincode (PK)`, `product_id (PK)`, `orders_last_30d`, `cart_count`
-
----
-
-## 📈 Proven Impact & ROI Projection
-
-Based on a representative Amazon delivery station handling **25,000 parcels/day**:
-
-- **Late Cancellation Rate**: ~3.2% (800 parcels/day)
-- **Layer 1 Retention**: 24% of customers choose to keep their order upon viewing honest impact metrics (192 parcels kept/day)
-- **Layer 2 Re-Match Success**: 72% of remaining eligible parcels matched locally within 72h (438 parcels re-matched/day)
-- **Daily Avoided Returns**: **630 parcels/day** spared from reverse linehaul return
-- **Daily Fuel & Mileage Saved**: **24,250 km/day** (~60 delivery routes eliminated)
-- **Carbon Averted**: **~300 Metric Tons of CO₂ annually** per station
-- **Net Cost Savings**: **~$1.2M annually** in avoided reverse freight, unpacking labor, and restock handling
-
----
-
-## 🛡️ Risk Mitigation Matrix
-
-| Potential Risk | Smart Cancel Answer |
-| :--- | :--- |
-| **Nudge looks like a dark pattern** | Equal-dimension buttons, 1-tap cancellation, explicit estimate disclaimers, zero guilt copy or countdown timers. |
-| **Held parcels congest delivery hubs** | Parcels are held only when demand score is high (30-day velocity > 75), with a strict 72-hour TTL timer before warehouse return. |
-| **Parcel tampering risk** | Automated computer-vision optical seal inspection and photo verification before entering holding racks. |
-| **Customer privacy on packaging** | Automated thermal label reprinting. The original label is shredded/covered so the new buyer never sees previous customer details. |
-| **Zero nearby buyer demand** | Safe fallback: consolidated onto scheduled linehaul return to warehouse. We are never worse than today. |
-
----
-
-## 🚀 Running the Prototype Locally
-
-### Prerequisites
-- Node.js (v18 or higher)
-- npm or yarn
-
-### Installation
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd smart-cancel
+git clone https://github.com/ayush2459/smartcancel.git
+cd smartcancel
+npm ci
+cd backend
+npm ci
+cd ..
+```
 
-# Install dependencies
-npm install
+### 2. Create a dedicated PostgreSQL database
 
-# Start local development server
+Use a database named `smartcancy` and a local role permitted to create/use the schema. **Do not point SmartCancy at your FlowSense database.**
+
+For an existing local PostgreSQL installation, create an empty database with your normal local admin tools, then run from the repository root:
+
+```bash
+createdb smartcancy
+psql -d smartcancy -v ON_ERROR_STOP=1 -f database/schema.sql
+```
+
+If `createdb` reports that the database already exists, do not delete/reset it. Confirm it is the intended SmartCancy database before running SQL. The schema uses `pgcrypto` for UUID generation.
+
+Alternatively, start an isolated local Docker database. Replace the example password with your own and keep it private:
+
+```bash
+docker run --name smartcancy-postgres \
+  -e POSTGRES_DB=smartcancy \
+  -e POSTGRES_USER=smartcancy_app \
+  -e POSTGRES_PASSWORD='choose-a-local-password' \
+  -p 5432:5432 -d postgres:16
+```
+
+Apply the schema to that container:
+
+```bash
+PGPASSWORD='choose-a-local-password' psql -h localhost -p 5432 \
+  -U smartcancy_app -d smartcancy -v ON_ERROR_STOP=1 \
+  -f database/schema.sql
+```
+
+Verify the database:
+
+```bash
+psql -d smartcancy -c "\\dt"
+psql -d smartcancy -c "SELECT current_database(), current_user;"
+```
+
+A fresh schema should show 16 application tables. This bootstrap is not a migration for an already-initialized database and should not be rerun on it.
+
+### 3. Configure and start the backend
+
+```bash
+cd backend
+cp .env.example .env
+```
+
+Edit `backend/.env` locally so `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` match your SmartCancy database. Never commit `.env` or share credentials.
+
+Start terminal 1:
+
+```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to access:
-- **Customer App Simulator**: Test 1-tap cancellation and the Honest Impact Card.
-- **Logistics 3D Route Visualizer**: Animated dual-path comparison of Legacy Return vs Smart Cancel.
-- **Decision Engine Simulator**: Step through all 5 decision gates with interactive scenarios.
-- **Hub Slots & Redis TTL Manager**: Monitor physical rack occupancy and trigger incoming order matching.
-- **Fulfillment Irreversibility Calculator**: Calculate composite scores across different package stages.
-- **Impact & ROI Dashboard**: Test customizable A/B parameters and compute financial savings.
-- **Full 12-Section Hackathon Idea Document**: Executive-ready proposal reader.
+Health checks:
+- http://127.0.0.1:8000/api/health/live — process liveness.
+- http://127.0.0.1:8000/api/health — PostgreSQL connectivity.
 
----
+### 4. Start the frontend
 
-## 🏁 Hackathon Closing Statement
+In terminal 2, from the repository root:
 
-> **"We do not stop cancellations. We make them cheaper."**
+```bash
+npm run dev
+```
 
-*Created with passion by Team for AWS Hackathon.*
+Open http://localhost:3000. The current frontend is an interactive demo/simulator with local data; it is **not yet fully wired to all backend endpoints**. Never put database credentials or a privileged API secret into Vite/client-side variables.
+
+## Backend API
+
+Base URL: `http://127.0.0.1:8000`
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/health/live` | Liveness |
+| GET | `/api/health` | Database health |
+| POST | `/api/v1/cancellations` | Idempotent cancellation intake |
+| POST | `/api/v1/recovery/:eventId/evaluate` | Evaluate recovery candidates |
+| GET | `/api/v1/reports/overview` | Operational counters and recorded ledger totals |
+| GET | `/api/v1/reports/cancellations` | Paginated cancellation listing |
+| GET | `/api/v1/reports/decisions/:decisionId` | Decision, candidates and ledger detail |
+| POST | `/api/v1/approvals/:decisionId/approve` | Human approval |
+| POST | `/api/v1/approvals/:decisionId/reject` | Human rejection |
+| POST | `/api/v1/executions/:decisionId/execute` | Simulated execution only |
+| GET | `/api/v1/executions/:decisionId` | Execution/audit history |
+
+Cancellation intake requires `order_number`, `reason`, `source`, and `idempotency_key` (or an `Idempotency-Key` header). Sources: `CUSTOMER_APP`, `CUSTOMER_SUPPORT`, `SYSTEM`, `OPERATOR`. Requests require matching records in the database; no seed or customer records are automatically inserted.
+
+## Commands
+
+From repository root:
+
+```bash
+npm run dev       # frontend
+npm run build     # production frontend build
+npm run lint      # TypeScript type check
+```
+
+From `backend/`:
+
+```bash
+npm run dev       # API with Node watch mode
+npm start         # API
+npm run check     # syntax checks for backend files
+npm test          # API smoke tests against a running backend
+```
+
+The API smoke tests expect the backend to be running at `http://127.0.0.1:8000`; set `API_BASE_URL` to override this. GitHub Actions runs these checks with an isolated temporary PostgreSQL database.
+
+## Production readiness checklist
+
+- **Authentication and authorization are not implemented.** Do not expose the API publicly or treat caller-provided `actor` values as verified identity. Add real authentication, role-based access control, and verified audit attribution before deployment.
+- **Frontend integration is incomplete.** The visible screens use demo data; connect them to the API through a server-side integration layer before describing the product as fully integrated.
+- **Recovery scoring is a prototype.** `rules-v1` is not a trained/validated model. Calibrate cost, carbon factors, SLA risk, and confidence with operational data.
+- **Execution is simulation-only.** No real dispatch, rematching, label printing, refunds, or order/parcel mutation occurs.
+- Add request IDs, rate limiting, structured logs, monitoring, backup/restore drills, and a formal migration/versioning strategy.
+- Define data retention, minimize personal data, and review privacy/access controls before processing real customer data.
+- Publish only measured, auditable impact results; treat concept/ROI values as assumptions until validated.
+
+## Safety
+
+- Keep `.env`, credentials, production dumps, and real customer data out of Git.
+- Never run destructive database commands against FlowSense or any database containing data you need.
+- The SQL file is for a fresh SmartCancy database; it is not an automatic migration.
