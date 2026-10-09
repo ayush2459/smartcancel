@@ -1,8 +1,8 @@
 # SmartCancy — cancellation recovery and sustainable logistics
 
-SmartCancy is a prototype for reducing waste when orders are cancelled late. The repository includes an interactive React/Vite simulator and a separate PostgreSQL-backed Express API for cancellation intake, recovery recommendations, human approval, simulated execution, and reports.
+SmartCancy is a prototype for reducing waste when orders are cancelled late. This repository contains an interactive React/Vite simulator and a separate PostgreSQL-backed Express API for cancellation intake, recovery recommendations, human approval, simulated execution, and reports.
 
-> **Prototype boundary:** the frontend currently includes local demo data. The backend uses deterministic rule-based recommendations and illustrative estimates. Execution is simulation-only: it does not dispatch riders, reprint labels, refund payments, mutate live orders/parcels, or establish verified savings. Figures in the concept material are projections, not measured results.
+> **Prototype boundary:** the frontend currently uses local demo data. The backend uses deterministic rule-based recommendations and illustrative estimates. Execution is simulation-only: it does not dispatch riders, reprint labels, refund payments, mutate live orders/parcels, or establish verified savings. Concept/ROI figures are projections, not measured results.
 
 ## Repository layout
 
@@ -34,16 +34,23 @@ cd ..
 
 Use a database named `smartcancy` and a local role permitted to create/use the schema. **Do not point SmartCancy at your FlowSense database.**
 
-For an existing local PostgreSQL installation, create an empty database with your normal local admin tools, then run from the repository root:
+If you already have local PostgreSQL, use your normal admin tool to create a fresh database owned by the role you will configure in `backend/.env`. For example, in a local admin `psql` session (replace the sample password locally):
 
-```bash
-createdb smartcancy
-psql -d smartcancy -v ON_ERROR_STOP=1 -f database/schema.sql
+```sql
+CREATE ROLE smartcancy_app LOGIN PASSWORD 'set-your-own-local-password';
+CREATE DATABASE smartcancy OWNER smartcancy_app;
 ```
 
-If `createdb` reports that the database already exists, do not delete/reset it. Confirm it is the intended SmartCancy database before running SQL. The schema uses `pgcrypto` for UUID generation.
+Then from the repository root, apply the schema:
 
-Alternatively, start an isolated local Docker database. Replace the example password with your own and keep it private:
+```bash
+psql -h localhost -p 5432 -U smartcancy_app -d smartcancy \
+  -v ON_ERROR_STOP=1 -f database/schema.sql
+```
+
+If the role or database already exists, do not drop or reset it. Confirm you are targeting the intended SmartCancy database first. The schema uses `pgcrypto` for UUID generation.
+
+Alternatively, start an isolated Docker database (choose your own local password and keep it private):
 
 ```bash
 docker run --name smartcancy-postgres \
@@ -53,7 +60,7 @@ docker run --name smartcancy-postgres \
   -p 5432:5432 -d postgres:16
 ```
 
-Apply the schema to that container:
+Apply the schema:
 
 ```bash
 PGPASSWORD='choose-a-local-password' psql -h localhost -p 5432 \
@@ -61,11 +68,11 @@ PGPASSWORD='choose-a-local-password' psql -h localhost -p 5432 \
   -f database/schema.sql
 ```
 
-Verify the database:
+Verify:
 
 ```bash
-psql -d smartcancy -c "\\dt"
-psql -d smartcancy -c "SELECT current_database(), current_user;"
+psql -h localhost -p 5432 -U smartcancy_app -d smartcancy -c "\\dt"
+psql -h localhost -p 5432 -U smartcancy_app -d smartcancy -c "SELECT current_database(), current_user;"
 ```
 
 A fresh schema should show 16 application tables. This bootstrap is not a migration for an already-initialized database and should not be rerun on it.
@@ -97,7 +104,7 @@ In terminal 2, from the repository root:
 npm run dev
 ```
 
-Open http://localhost:3000. The current frontend is an interactive demo/simulator with local data; it is **not yet fully wired to all backend endpoints**. Never put database credentials or a privileged API secret into Vite/client-side variables.
+Open http://localhost:3000. The frontend is currently an interactive demo/simulator with local data; it is **not yet fully wired to all backend endpoints**. Never put database credentials or a privileged API secret into Vite/client-side variables.
 
 ## Backend API
 
@@ -117,7 +124,7 @@ Base URL: `http://127.0.0.1:8000`
 | POST | `/api/v1/executions/:decisionId/execute` | Simulated execution only |
 | GET | `/api/v1/executions/:decisionId` | Execution/audit history |
 
-Cancellation intake requires `order_number`, `reason`, `source`, and `idempotency_key` (or an `Idempotency-Key` header). Sources: `CUSTOMER_APP`, `CUSTOMER_SUPPORT`, `SYSTEM`, `OPERATOR`. Requests require matching records in the database; no seed or customer records are automatically inserted.
+Cancellation intake requires `order_number`, `reason`, `source`, and `idempotency_key` (or an `Idempotency-Key` header). Sources: `CUSTOMER_APP`, `CUSTOMER_SUPPORT`, `SYSTEM`, `OPERATOR`. Requests depend on records already in the database; no seed/customer records are automatically inserted.
 
 ## Commands
 
@@ -134,16 +141,15 @@ From `backend/`:
 ```bash
 npm run dev       # API with Node watch mode
 npm start         # API
-npm run check     # syntax checks for backend files
 npm test          # API smoke tests against a running backend
 ```
 
-The API smoke tests expect the backend to be running at `http://127.0.0.1:8000`; set `API_BASE_URL` to override this. GitHub Actions runs these checks with an isolated temporary PostgreSQL database.
+The smoke tests expect the backend at `http://127.0.0.1:8000`; override with `API_BASE_URL`. GitHub Actions runs the checks against an isolated temporary PostgreSQL database.
 
 ## Production readiness checklist
 
 - **Authentication and authorization are not implemented.** Do not expose the API publicly or treat caller-provided `actor` values as verified identity. Add real authentication, role-based access control, and verified audit attribution before deployment.
-- **Frontend integration is incomplete.** The visible screens use demo data; connect them to the API through a server-side integration layer before describing the product as fully integrated.
+- **Frontend integration is incomplete.** The screens use demo data; connect them to the API through a server-side integration layer before describing the product as fully integrated.
 - **Recovery scoring is a prototype.** `rules-v1` is not a trained/validated model. Calibrate cost, carbon factors, SLA risk, and confidence with operational data.
 - **Execution is simulation-only.** No real dispatch, rematching, label printing, refunds, or order/parcel mutation occurs.
 - Add request IDs, rate limiting, structured logs, monitoring, backup/restore drills, and a formal migration/versioning strategy.
