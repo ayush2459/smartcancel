@@ -1,4 +1,6 @@
-﻿import 'dotenv/config';
+import dotenv from 'dotenv';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import pg from 'pg';
 import { createCancellationRouter } from './routes/cancellations.js';
@@ -6,6 +8,9 @@ import { createRecoveryRouter } from './routes/recovery.js';
 import { createReportsRouter } from './routes/reports.js';
 import { createApprovalRouter } from './routes/approvals.js';
 import { createExecutionRouter } from './routes/executions.js';
+import { createDecisionRouter } from './routes/decisions.js';
+
+dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../.env') });
 
 const { Pool } = pg;
 const app = express();
@@ -50,6 +55,7 @@ app.use('/api/v1/recovery', createRecoveryRouter(pool));
 app.use('/api/v1/reports', createReportsRouter(pool));
 app.use('/api/v1/approvals', createApprovalRouter(pool));
 app.use('/api/v1/executions', createExecutionRouter(pool));
+app.use('/api/v1/decisions', createDecisionRouter(pool));
 
 app.get('/api/health/live', (_req, res) => {
   res.json({
@@ -105,7 +111,6 @@ async function shutdown(signal) {
 
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
-
 
 
 
