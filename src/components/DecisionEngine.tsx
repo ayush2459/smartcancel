@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Check, ArrowRight, Play, RotateCcw, AlertCircle, Sparkles } from 'lucide-react';
+import { useOperations } from '../context/OperationsContext';
 
 interface ScenarioPreset {
   id: string;
@@ -60,10 +61,18 @@ const PRESETS: ScenarioPreset[] = [
 ];
 
 export const DecisionEngine: React.FC = () => {
+  const { selectedEvent, updateSelectedEvent } = useOperations();
   const [score, setScore] = useState<number>(85);
   const [nudgeKept, setNudgeKept] = useState<boolean>(false);
   const [isEligible, setIsEligible] = useState<boolean>(true);
   const [isDemandHigh, setIsDemandHigh] = useState<boolean>(true);
+  useEffect(() => {
+    if (!selectedEvent) return;
+    setScore(selectedEvent.score);
+    setIsEligible(selectedEvent.eligible);
+    setIsDemandHigh(selectedEvent.demand >= 75);
+    setNudgeKept(selectedEvent.customerKept);
+  }, [selectedEvent?.id, selectedEvent?.score, selectedEvent?.status]);
 
   // Derive decision path
   const isEarly = score <= 50;
@@ -89,6 +98,8 @@ export const DecisionEngine: React.FC = () => {
     setNudgeKept(p.nudgeAction === 'keep');
     setIsEligible(p.isEligible);
     setIsDemandHigh(p.demandHigh);
+    const stage=p.score<=25?'Ordered':p.score<=50?'Packed':p.score<=75?'In transit':'Last mile';
+    updateSelectedEvent({score:p.score,stage,customerKept:p.nudgeAction==='keep',eligible:p.isEligible,demand:p.demandHigh?85:55});
   };
 
   return (
@@ -305,7 +316,7 @@ export const DecisionEngine: React.FC = () => {
                               Hold at local hub, match nearby order, dispatch
                             </div>
                             <div className="text-[11px] font-medium text-amber-950 mt-1">
-                              ✓ 0 warehouse roundtrip miles
+                              ✓ 0 warehouse roundtrip kilometres
                             </div>
                           </div>
                         )}
@@ -336,7 +347,7 @@ export const DecisionEngine: React.FC = () => {
                 min="0"
                 max="100"
                 value={score}
-                onChange={(e) => setScore(Number(e.target.value))}
+                onChange={(e) => {const value=Number(e.target.value);setScore(value);updateSelectedEvent({score:value,stage:value<=25?'Ordered':value<=50?'Packed':value<=75?'In transit':'Last mile'});}}
                 className="w-full accent-amber-500 cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-400 font-mono">
@@ -353,7 +364,7 @@ export const DecisionEngine: React.FC = () => {
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <button
-                  onClick={() => setNudgeKept(true)}
+                  onClick={() => {setNudgeKept(true);updateSelectedEvent({customerKept:true});}}
                   disabled={isEarly}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     nudgeKept
@@ -364,7 +375,7 @@ export const DecisionEngine: React.FC = () => {
                   Keep my order
                 </button>
                 <button
-                  onClick={() => setNudgeKept(false)}
+                  onClick={() => {setNudgeKept(false);updateSelectedEvent({customerKept:false});}}
                   disabled={isEarly}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     !nudgeKept
@@ -389,7 +400,7 @@ export const DecisionEngine: React.FC = () => {
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <button
-                  onClick={() => setIsEligible(true)}
+                  onClick={() => {setIsEligible(true);updateSelectedEvent({eligible:true});}}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     isEligible
                       ? 'bg-emerald-500 text-white font-bold border-emerald-600'
@@ -399,7 +410,7 @@ export const DecisionEngine: React.FC = () => {
                   Eligible (Standard)
                 </button>
                 <button
-                  onClick={() => setIsEligible(false)}
+                  onClick={() => {setIsEligible(false);updateSelectedEvent({eligible:false});}}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     !isEligible
                       ? 'bg-rose-600 text-white font-bold border-rose-700'
@@ -418,7 +429,7 @@ export const DecisionEngine: React.FC = () => {
               </label>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <button
-                  onClick={() => setIsDemandHigh(true)}
+                  onClick={() => {setIsDemandHigh(true);updateSelectedEvent({demand:85});}}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     isDemandHigh
                       ? 'bg-amber-400 text-slate-950 font-bold border-amber-500'
@@ -428,7 +439,7 @@ export const DecisionEngine: React.FC = () => {
                   High Demand (≥ 75)
                 </button>
                 <button
-                  onClick={() => setIsDemandHigh(false)}
+                  onClick={() => {setIsDemandHigh(false);updateSelectedEvent({demand:55});}}
                   className={`py-2 px-3 rounded-lg border text-center transition-colors cursor-pointer ${
                     !isDemandHigh
                       ? 'bg-slate-800 text-white font-bold border-slate-900'

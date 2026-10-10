@@ -2,15 +2,37 @@ import React, { useState, useEffect } from 'react';
 import { HubSlot } from '../types/smartCancel';
 import { INITIAL_HUB_SLOTS, ELIGIBILITY_RULES } from '../data/mockData';
 import { Clock, ShieldCheck, CheckCircle2, AlertTriangle, ArrowRight, Package, Printer, Sparkles } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { useOperations } from '../context/OperationsContext';
+import { getCompatibleMockOrders } from '../utils/hubConstraints';
 
 export const HubRackManager: React.FC = () => {
+  const { selectedEvent, updateStatus } = useOperations();
   const [slots, setSlots] = useState<HubSlot[]>(INITIAL_HUB_SLOTS);
   const [activeSlotId, setActiveSlotId] = useState<string>('slot-1');
   const [lastDispatchedInfo, setLastDispatchedInfo] = useState<string | null>(null);
 
   // Active slot details
   const activeSlot = slots.find((s) => s.id === activeSlotId) || slots[0];
+
+  useEffect(() => {
+    if (!selectedEvent) return;
+    if (selectedEvent.status === 'On hold') {
+      setSlots(prev => {
+        if (prev.some(slot => slot.parcelId === selectedEvent.parcelId)) return prev;
+        const free = prev.find(slot => !slot.isOccupied && slot.pincode === selectedEvent.pincode);
+        if (!free) return prev;
+        return prev.map(slot => slot.id === free.id ? {...slot, parcelId:selectedEvent.parcelId, productName:selectedEvent.product, category:selectedEvent.category, pincode:selectedEvent.pincode, sealVerified:selectedEvent.sealVerified, sealPhotoStatus:selectedEvent.sealVerified?'verified':'flagged', holdHoursRemaining:selectedEvent.holdHours, demandScore:selectedEvent.demand, isOccupied:true, isDispatched:false} : slot);
+      });
+    } else if (['Matched','Executed','Fallback','Rejected'].includes(selectedEvent.status)) {
+      setSlots(prev => {
+        if ((selectedEvent.status==='Matched'||selectedEvent.status==='Executed') && !prev.some(slot=>slot.parcelId===selectedEvent.parcelId)) {
+          const free=prev.find(slot=>!slot.isOccupied&&slot.pincode===selectedEvent.pincode);
+          if(free)return prev.map(slot=>slot.id===free.id?{...slot,parcelId:selectedEvent.parcelId,productName:selectedEvent.product,category:selectedEvent.category,pincode:selectedEvent.pincode,sealVerified:selectedEvent.sealVerified,sealPhotoStatus:selectedEvent.sealVerified?'verified':'flagged',holdHoursRemaining:0,demandScore:selectedEvent.demand,isOccupied:false,isDispatched:true,matchedOrderId:selectedEvent.matchedOrderId}:slot);
+        }
+        return prev.map(slot => slot.parcelId === selectedEvent.parcelId ? {...slot, isOccupied:false, isDispatched:selectedEvent.status==='Matched'||selectedEvent.status==='Executed', matchedOrderId:selectedEvent.status==='Matched'||selectedEvent.status==='Executed'?(selectedEvent.matchedOrderId||slot.matchedOrderId):undefined} : slot);
+      });
+    }
+  }, [selectedEvent?.id, selectedEvent?.status]);
 
   // Tick down hold timers every few seconds to demonstrate Redis TTL behavior
   useEffect(() => {
@@ -31,26 +53,29 @@ export const HubRackManager: React.FC = () => {
   }, []);
 
   const handleSimulateIncomingOrder = () => {
+    if (!selectedEvent || selectedEvent.status !== 'On hold') {
+      setLastDispatchedInfo('Simulation unavailable: approve and place the selected event on hub hold before matching.');
+      return;
+    }
     // Find the occupied slot with highest demand score
-    const occupiedSlots = slots.filter((s) => s.isOccupied && s.sealVerified);
+    const occupiedSlots = slots.filter((s) => s.parcelId === selectedEvent.parcelId && s.pincode === selectedEvent.pincode && s.isOccupied && s.sealVerified && s.sealPhotoStatus === 'verified' && s.holdHoursRemaining > 0 && s.demandScore >= 75);
     if (occupiedSlots.length === 0) {
       alert('All slots are currently empty or waiting for new held parcels.');
       return;
     }
 
-    const matched = occupiedSlots.sort((a, b) => b.demandScore - a.demandScore)[0];
-    const newOrderId = `AMZ-${Math.floor(10000 + Math.random() * 90000)}`;
-
-    confetti({
-      particleCount: 60,
-      spread: 70,
-      origin: { y: 0.6 },
-      colors: ['#10B981', '#F59E0B', '#3B82F6'],
-    });
+    const matched = occupiedSlots.sort((a, b) => b.demandScore - a.demandScore || a.id.localeCompare(b.id))[0];
+    const compatibleOrder = getCompatibleMockOrders(selectedEvent)[0];
+    if (!compatibleOrder) {
+      setLastDispatchedInfo('No compatible mock demand order exists for this parcel and pincode. It remains on hold until fallback or expiry.');
+      return;
+    }
+    const newOrderId = compatibleOrder.id;
 
     setLastDispatchedInfo(
-      `Parcel ${matched.parcelId} (${matched.productName}) successfully matched to incoming Order #${newOrderId} in pincode ${matched.pincode}! Thermal shipping label reprinted.`
+      `SIMULATION ONLY: Parcel ${matched.parcelId} (${matched.productName}) allocated to compatible order #${newOrderId} in pincode ${matched.pincode}. This is not a confirmed dispatch.`
     );
+    void updateStatus('Matched', 'AI-ASSISTED');
 
     // Free the slot after a brief dispatch animation
     setSlots((prev) =>
@@ -107,6 +132,7 @@ export const HubRackManager: React.FC = () => {
           <p className="text-sm text-slate-600 mt-1 max-w-3xl">
             Holding costs hub space, so we hold only when the demand score is high. Each held parcel has a 3-point check: optical seal verification, Redis TTL hold timer, and real-time pincode demand scoring.
           </p>
+          <p className="text-[10px] font-semibold text-amber-800 mt-2">DETERMINISTIC MOCK INVENTORY · Selected event parcels appear here only while their shared status is On hold.</p>
         </div>
 
         {/* Dispatch Simulator Button */}
@@ -132,7 +158,7 @@ export const HubRackManager: React.FC = () => {
         <div className="mb-6 p-4 bg-emerald-50 border border-emerald-300 rounded-xl flex items-start gap-3 text-emerald-900 text-xs animate-in fade-in">
           <Printer className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <span className="font-bold">Automated Re-Labeling & Dispatch Triggered:</span>{' '}
+            <span className="font-bold">Simulated allocation (not a confirmed dispatch):</span>{' '}
             {lastDispatchedInfo}
           </div>
           <button
@@ -151,10 +177,10 @@ export const HubRackManager: React.FC = () => {
           <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-6">
             <div>
               <h2 className="text-sm font-bold text-slate-900">
-                Hub Delivery Station #DSE8 Holding Grid
+                Noida Hub #NDH1 Holding Grid
               </h2>
               <p className="text-xs text-slate-500">
-                Pincode 98109 · Max Capacity: 6 Staging Racks
+                Pincode 201301 · Max Capacity: 6 Staging Racks
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
@@ -257,7 +283,7 @@ export const HubRackManager: React.FC = () => {
 
           <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>Holding TTL: 72 hours max (Managed via Redis key expiry)</span>
-            <span>Fallback: Automatic linehaul consolidation to FC #BFI4</span>
+            <span>Fallback: Automatic linehaul consolidation to FC #DEL1</span>
           </div>
         </div>
 
@@ -337,11 +363,11 @@ export const HubRackManager: React.FC = () => {
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1">
                       <div className="p-2 bg-white rounded border border-slate-200">
-                        <span className="text-slate-400 block">Orders (last 30d):</span>
+                        <span className="text-slate-400 block">Mock orders (last 30d):</span>
                         <span className="font-semibold text-slate-900">48 orders</span>
                       </div>
                       <div className="p-2 bg-white rounded border border-slate-200">
-                        <span className="text-slate-400 block">Cart / Wishlist:</span>
+                        <span className="text-slate-400 block">Mock cart / wishlist:</span>
                         <span className="font-semibold text-slate-900">126 users</span>
                       </div>
                     </div>

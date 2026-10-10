@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, RotateCcw, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
+import { useOperations } from '../context/OperationsContext';
+import { calculateImpact, IMPACT_ASSUMPTIONS } from '../utils/impact';
 
 export const LogisticsVisualizer: React.FC = () => {
+  const { selectedEvent } = useOperations();
+  const eventImpact = selectedEvent ? calculateImpact(selectedEvent) : null;
   const [activeMode, setActiveMode] = useState<'side_by_side' | 'today' | 'smart_cancel'>('side_by_side');
   const [isPlaying, setIsPlaying] = useState(true);
   const [animProgress, setAnimProgress] = useState(0); // 0 to 100
@@ -110,7 +114,7 @@ export const LogisticsVisualizer: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-mono font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                    +84 km total travel
+                    +{eventImpact?.conventional.distanceKm.toFixed(1) ?? '—'} km estimated travel · {selectedEvent?.id ?? 'No event'}
                   </span>
                 </div>
               </div>
@@ -150,7 +154,7 @@ export const LogisticsVisualizer: React.FC = () => {
                       Regional Warehouse
                     </text>
                     <text x="0" y="78" textAnchor="middle" fill="#64748b" fontSize="9">
-                      FC #BFI4
+                      FC #DEL1
                     </text>
                   </g>
 
@@ -169,7 +173,7 @@ export const LogisticsVisualizer: React.FC = () => {
                     <polygon points="-28,-4 0,10 0,30 -28,16" fill="#1d4ed8" stroke="#2563eb" strokeWidth="1" />
                     <polygon points="0,10 28,-4 28,16 0,30" fill="#1e40af" stroke="#1d4ed8" strokeWidth="1" />
                     <text x="-40" y="20" textAnchor="end" fill="#93c5fd" fontSize="10" fontWeight="600">
-                      Local Hub #DSE8
+                      Noida Hub #NDH1
                     </text>
                   </g>
 
@@ -224,7 +228,7 @@ export const LogisticsVisualizer: React.FC = () => {
                       Long trip back ➔
                     </text>
                     <text x="47" y="11" textAnchor="middle" fill="#f87171" fontSize="7.5">
-                      +42 km return transit
+                      +{IMPACT_ASSUMPTIONS.conventionalReturnKm} km estimated return transit
                     </text>
                   </g>
 
@@ -277,7 +281,7 @@ export const LogisticsVisualizer: React.FC = () => {
               <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
                 <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
                   <div className="text-slate-500 text-[11px]">Total Distance</div>
-                  <div className="font-mono font-bold text-rose-700 text-sm">84.0 km</div>
+                  <div className="font-mono font-bold text-rose-700 text-sm">{eventImpact?.conventional.distanceKm.toFixed(1) ?? '—'} km</div>
                   <div className="text-[10px] text-slate-400">Out + full return</div>
                 </div>
                 <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200">
@@ -375,7 +379,7 @@ export const LogisticsVisualizer: React.FC = () => {
                     <circle cx="0" cy="5" r="16" fill="#f59e0b" opacity="0.3" />
 
                     <text x="-38" y="20" textAnchor="end" fill="#93c5fd" fontSize="10" fontWeight="600">
-                      Local Hub #DSE8
+                      Noida Hub #NDH1
                     </text>
                     <text x="-38" y="32" textAnchor="end" fill="#f59e0b" fontSize="8.5" fontWeight="bold">
                       Holding Rack (Redis TTL)
@@ -411,7 +415,7 @@ export const LogisticsVisualizer: React.FC = () => {
                       Short trip to new buyer
                     </text>
                     <text x="48" y="11" textAnchor="middle" fill="#34d399" fontSize="7.5">
-                      3.2 km local dispatch
+                      {selectedEvent?.distanceKm.toFixed(1) ?? '—'} km selected event route
                     </text>
                   </g>
 
@@ -465,13 +469,13 @@ export const LogisticsVisualizer: React.FC = () => {
               <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
                 <div className="p-2.5 bg-emerald-50 rounded-lg border border-emerald-200">
                   <div className="text-emerald-800 text-[11px]">Total Distance</div>
-                  <div className="font-mono font-bold text-emerald-700 text-sm">12.2 km</div>
-                  <div className="text-[10px] text-emerald-600">Saved 71.8 km!</div>
+                  <div className="font-mono font-bold text-emerald-700 text-sm">{eventImpact?.smart.distanceKm.toFixed(1) ?? '—'} km</div>
+                  <div className="text-[10px] text-emerald-600">Potential route reduction: {eventImpact?.savings.distanceKm.toFixed(1) ?? '—'} km</div>
                 </div>
                 <div className="p-2.5 bg-emerald-50 rounded-lg border border-emerald-200">
                   <div className="text-emerald-800 text-[11px]">CO₂ Emissions</div>
-                  <div className="font-mono font-bold text-emerald-700 text-sm">0.42 kg</div>
-                  <div className="text-[10px] text-emerald-600">Saved 2.42 kg!</div>
+                  <div className="font-mono font-bold text-emerald-700 text-sm">{eventImpact?.smart.co2Kg.toFixed(2) ?? '—'} kg CO₂e</div>
+                  <div className="text-[10px] text-emerald-600">Potential difference: {eventImpact?.savings.co2Kg.toFixed(2) ?? '—'} kg CO₂e</div>
                 </div>
                 <div className="p-2.5 bg-emerald-50 rounded-lg border border-emerald-200">
                   <div className="text-emerald-800 text-[11px]">Delivery Time</div>

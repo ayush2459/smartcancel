@@ -1,7 +1,7 @@
 import React from 'react';
 import { RotateCcw, Play } from 'lucide-react';
 
-export type TabKey = 'app' | 'customer' | 'visualizer' | 'decision' | 'racks' | 'score' | 'roi' | 'architecture' | 'document';
+export type TabKey = 'app' | 'backend' | 'customer' | 'visualizer' | 'decision' | 'racks' | 'score' | 'roi' | 'architecture' | 'document';
 
 interface NavbarProps {
   activeTab: TabKey;
@@ -47,16 +47,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             Operations
           </button>
-          <button
-            onClick={() => onSelectTab('customer')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-              activeTab === 'customer'
-                ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/40'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            Customer App
-          </button>
+          <button onClick={() => onSelectTab('backend')} className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap ${activeTab === 'backend' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>Live API</button>
+          <button onClick={() => onSelectTab('customer')} className={`px-3 py-1.5 text-xs font-medium rounded-md whitespace-nowrap ${activeTab === 'customer' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-300 hover:text-white hover:bg-slate-800/60'}`}>Customer App</button>
           <button
             onClick={() => onSelectTab('visualizer')}
             className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
@@ -150,14 +142,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           Operations
         </button>
-        <button
-          onClick={() => onSelectTab('customer')}
-          className={`px-2.5 py-1 rounded whitespace-nowrap ${
-            activeTab === 'customer' ? 'bg-amber-400 text-slate-900 font-semibold' : 'text-slate-300'
-          }`}
-        >
-          Customer App
-        </button>
+        <button onClick={() => onSelectTab('backend')} className={`px-2.5 py-1 rounded whitespace-nowrap ${activeTab === 'backend' ? 'bg-amber-400 text-slate-900 font-semibold' : 'text-slate-300'}`}>Live API</button>
+        <button onClick={() => onSelectTab('customer')} className={`px-2.5 py-1 rounded whitespace-nowrap ${activeTab === 'customer' ? 'bg-amber-400 text-slate-900 font-semibold' : 'text-slate-300'}`}>Customer App</button>
         <button
           onClick={() => onSelectTab('visualizer')}
           className={`px-2.5 py-1 rounded whitespace-nowrap ${

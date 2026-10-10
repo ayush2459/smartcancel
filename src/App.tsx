@@ -14,10 +14,16 @@ import { ScoreCalculator } from './components/ScoreCalculator';
 import { ArchitectureViewer } from './components/ArchitectureViewer';
 import { MetricsAndRoi } from './components/MetricsAndRoi';
 import { IdeaDocument } from './components/IdeaDocument';
+import { BackendOperationsDashboard } from './components/BackendOperationsDashboard';
+import { OperationsProvider } from './context/OperationsContext';
+import { ConnectedEventBar } from './components/ConnectedEventBar';
+import { useOperations } from './context/OperationsContext';
+import { canPlaceOnHold } from './utils/hubConstraints';
 import confetti from 'canvas-confetti';
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>('app');
+function AppContent() {
+  const { updateStatus, selectedEvent, events, reset } = useOperations();
+  const [activeTab, setActiveTab] = useState<TabKey>('backend');
   const [demoKey, setDemoKey] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -38,8 +44,10 @@ export default function App() {
   };
 
   const handleReset = () => {
+    reset();
     setDemoKey((key) => key + 1);
-    showToast('Customer demo reset. Backend records were not changed.');
+    setActiveTab('app');
+    showToast('Simulation reset. Backend records were not changed.');
   };
 
   return (
@@ -63,7 +71,8 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1">
         {activeTab === 'app' && <OperationsDashboard />}
-
+        {activeTab === 'backend' && <BackendOperationsDashboard />}
+        {activeTab !== 'app' && activeTab !== 'backend' && activeTab !== 'document' && <ConnectedEventBar section={activeTab} />}
         {activeTab === 'customer' && (
           <CustomerSimulator
             key={demoKey}
@@ -71,9 +80,16 @@ export default function App() {
               if (data.nudgeAction === 'keep') {
                 showToast(`Local demo: customer kept ${data.product.name}. No backend request was sent.`);
               } else if (data.matched) {
-                showToast(`Local demo match only for ${data.product.name}. No backend request was sent.`);
+                if (selectedEvent && canPlaceOnHold(selectedEvent,events).allowed) {
+                  showToast(`Simulated local match confirmed. Potential route reduction: about ${data.product.extraDistanceKm} km (estimate).`);
+                  void updateStatus('Approved', 'OPERATOR').then(()=>updateStatus('On hold', 'SYSTEM')).then(()=>updateStatus('Matched', 'AI-ASSISTED'));
+                } else {
+                  showToast('No hub capacity is available in this simulation; warehouse fallback selected.');
+                  void updateStatus('Fallback', 'SYSTEM');
+                }
               } else {
-                showToast(`Local demo completed for ${data.product.name}. No backend request was sent.`);
+                showToast(`Standard warehouse return initiated for ${data.product.name}.`);
+                void updateStatus(data.stage === 'ordered' ? 'Executed' : 'Fallback', 'SYSTEM');
               }
             }}
           />
@@ -114,3 +130,5 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() { return <OperationsProvider><AppContent /></OperationsProvider>; }

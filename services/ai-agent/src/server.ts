@@ -27,7 +27,7 @@ function positiveInt(value: string | undefined, fallback: number): number {
 export function providerFromEnvironment(): LlmProvider | undefined {
   if (process.env.AI_AGENT_PROVIDER !== "gemini") return undefined;
   const key = process.env.GEMINI_API_KEY;
-  return key ? new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-2.5-flash") : undefined;
+  return key ? new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.8-flash") : undefined;
 }
 
 export function configFromEnvironment(): AgentServerConfig {

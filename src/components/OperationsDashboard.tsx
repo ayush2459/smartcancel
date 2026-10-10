@@ -1,209 +1,44 @@
-import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { backendApi, type CancellationRecord, type DecisionReport, type OverviewMetrics } from '../services/backendApi';
+import React, { useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, Check, Clock3, Leaf, Package, RotateCcw, Search, ShieldCheck, Truck, Zap } from 'lucide-react';
+import { IMPACT_ASSUMPTIONS, calculateImpact } from '../utils/impact';
+import type { Actor, EventStatus } from '../types/operations';
+import { useOperations } from '../context/OperationsContext';
+import { evaluateScenario, type ScenarioId } from '../utils/scenario';
+import { canMatchHeldParcel, canPlaceOnHold } from '../utils/hubConstraints';
+import { getCompatibleMockOrders } from '../utils/hubConstraints';
+import { formatINR } from '../utils/locale';
 
-const numberValue = (value: number | string | null | undefined) =>
-  Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+const SCENARIOS: {id:ScenarioId;label:string;description:string}[]=[
+ {id:'early',label:'Early cancellation',description:'Ordered stage; stop before dispatch'}, {id:'nearby',label:'Nearby compatible demand',description:'Sealed item with demand at same hub'}, {id:'lastmile',label:'Near-delivery cancellation',description:'Last-mile parcel with partner time in progress'}, {id:'nodemand',label:'No local demand',description:'No eligible nearby order before hold expiry'}, {id:'capacity',label:'Hub at 95% capacity',description:'Only one free slot remains'}, {id:'value',label:'High-value parcel',description:'Extra approval threshold for high-value goods'}, {id:'simultaneous',label:'Simultaneous cancellations',description:'Two parcels compete for one remaining slot'}, {id:'failure',label:'Hub failure',description:'Selected hub unavailable; use fallback'}];
+const badge=(status:string)=>status==='Matched'||status==='Executed'?'bg-emerald-100 text-emerald-800':status==='Fallback'||status==='Rejected'?'bg-rose-100 text-rose-800':'bg-amber-100 text-amber-900';
+const fmt=(n:number,d=1)=>n.toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
 
-const dateValue = (value: string) => new Date(value).toLocaleString();
-
-const isAwaitingApproval = (status: string | null) =>
-  status === 'RECOMMENDED' || status === 'REVIEW_REQUIRED';
-
-export function OperationsDashboard() {
-  const [events, setEvents] = useState<CancellationRecord[]>([]);
-  const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
-  const [selectedId, setSelectedId] = useState('');
-  const [decision, setDecision] = useState<DecisionReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [orderNumber, setOrderNumber] = useState('');
-  const [reason, setReason] = useState('');
-  const [source, setSource] = useState<'CUSTOMER_APP' | 'CUSTOMER_SUPPORT' | 'SYSTEM' | 'OPERATOR'>('OPERATOR');
-
-  const selected = events.find((event) => event.event_id === selectedId);
-
-  const refresh = useCallback(async () => {
-    setError('');
-    const [report, overview] = await Promise.all([
-      backendApi.listCancellations(),
-      backendApi.getOverview(),
-    ]);
-    setEvents(report.cancellations);
-    setMetrics(overview.metrics);
-    setSelectedId((current) =>
-      report.cancellations.some((event) => event.event_id === current)
-        ? current
-        : report.cancellations[0]?.event_id ?? '',
-    );
-  }, []);
-
-  useEffect(() => {
-    refresh()
-      .catch((loadError: unknown) => {
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load backend reports.');
-      })
-      .finally(() => setLoading(false));
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!selected?.decision_id) {
-      setDecision(null);
-      return;
-    }
-
-    let active = true;
-    backendApi.getDecision(selected.decision_id)
-      .then((report) => {
-        if (active) setDecision(report);
-      })
-      .catch((loadError: unknown) => {
-        if (active) {
-          setDecision(null);
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load decision details.');
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [selected?.decision_id, selected?.decision_status]);
-
-  const runAction = async (action: () => Promise<unknown>, successMessage: string) => {
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      await action();
-      await refresh();
-      setNotice(successMessage);
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : 'Backend request failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitCancellation = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const created = await backendApi.createCancellation({
-        order_number: orderNumber.trim(),
-        reason: reason.trim(),
-        source,
-      });
-      await refresh();
-      setSelectedId(created.event_id);
-      setOrderNumber('');
-      setReason('');
-      setNotice(created.duplicate ? 'Existing cancellation request loaded.' : 'Cancellation recorded by the backend.');
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : 'Cancellation request failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (loading) {
-    return <main className="max-w-7xl mx-auto px-4 py-10 text-sm text-slate-500">Connecting to the SmartCancy API…</main>;
-  }
-
-  return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-7 space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold tracking-wide text-amber-700">LIVE BACKEND · OPERATIONS</p>
-          <h1 className="mt-1 text-2xl sm:text-3xl font-bold">Cancellation recovery</h1>
-          <p className="mt-1 text-sm text-slate-600">Real database records and API actions. Execution is simulation-only.</p>
-        </div>
-        <button onClick={() => void runAction(refresh, 'Backend data refreshed.')} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-semibold disabled:opacity-50">
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </header>
-
-      {error && <div role="alert" className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
-      {notice && <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"><CheckCircle2 className="h-4 w-4 shrink-0" />{notice}</div>}
-
-      {metrics && <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          ['Cancellation records', metrics.total_cancellations],
-          ['Awaiting evaluation', metrics.processing_decisions],
-          ['Awaiting review', metrics.decisions_requiring_review],
-          ['Recorded savings (USD)', numberValue(metrics.recorded_cost_saved)],
-        ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="text-xs text-slate-500">{label}</div>
-          <div className="mt-1 text-2xl font-bold">{value}</div>
-          <div className="mt-1 text-[10px] text-slate-400">Values reported by backend</div>
-        </div>)}
-      </section>}
-
-      <section className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-100 p-4">
-            <h2 className="text-sm font-bold">Cancellation records</h2>
-            <p className="mt-1 text-xs text-slate-500">{events.length} shown · most recent first</p>
-          </div>
-          {events.length === 0 ? <p className="p-5 text-sm text-slate-500">{error ? 'Backend records are unavailable until the API connection is restored.' : 'No backend records yet. Submit an order number below to create a cancellation request.'}</p> : <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500"><tr>{['Order / event', 'Parcel', 'Stage', 'Decision', 'Status'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead>
-              <tbody className="divide-y divide-slate-100">{events.map((event) => <tr key={event.event_id} onClick={() => setSelectedId(event.event_id)} className={`cursor-pointer hover:bg-amber-50 ${selectedId === event.event_id ? 'bg-amber-50' : ''}`}>
-                <td className="px-4 py-3"><b>{event.order_number}</b><div className="mt-1 text-slate-500">{dateValue(event.received_at)}</div></td>
-                <td className="px-4 py-3">{event.parcel_number ?? '—'}</td>
-                <td className="px-4 py-3">{event.parcel_status ?? event.stage_at_cancel}</td>
-                <td className="px-4 py-3">{event.selected_action ?? event.decision_status ?? 'Not evaluated'}</td>
-                <td className="px-4 py-3">{event.decision_status ?? event.event_status}</td>
-              </tr>)}</tbody>
-            </table>
-          </div>}
-        </div>
-
-        <form onSubmit={(event) => void submitCancellation(event)} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-          <div>
-            <h2 className="text-sm font-bold">Record a cancellation</h2>
-            <p className="mt-1 text-xs text-slate-500">Uses an existing order in the configured database.</p>
-          </div>
-          <label className="block text-xs font-medium text-slate-700">Order number
-            <input required maxLength={50} value={orderNumber} onChange={(event) => setOrderNumber(event.target.value)} placeholder="ORD-8421" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </label>
-          <label className="block text-xs font-medium text-slate-700">Reason
-            <input required maxLength={100} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Customer request" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          </label>
-          <label className="block text-xs font-medium text-slate-700">Source
-            <select value={source} onChange={(event) => setSource(event.target.value as typeof source)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-              <option value="OPERATOR">Operator</option><option value="CUSTOMER_APP">Customer app</option><option value="CUSTOMER_SUPPORT">Customer support</option><option value="SYSTEM">System</option>
-            </select>
-          </label>
-          <button disabled={busy} className="w-full rounded-lg bg-amber-400 px-3 py-2 text-sm font-bold text-slate-900 disabled:opacity-50">Submit cancellation</button>
-        </form>
-      </section>
-
-      {selected && <section className="grid gap-5 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_auto]">
-        <div>
-          <h2 className="text-sm font-bold">Selected order · {selected.order_number}</h2>
-          <p className="mt-1 text-xs text-slate-500">{selected.reason} · {selected.source} · {selected.destination_pincode ?? 'No destination pincode'}</p>
-          {decision && <>
-            <p className="mt-3 text-sm"><b>{decision.decision.selected_action ?? 'No recommended action'}</b> · {decision.decision.status} · score {numberValue(decision.decision.recovery_score)}</p>
-            {decision.decision.reasoning_summary && <p className="mt-1 text-xs text-slate-600">{decision.decision.reasoning_summary}</p>}
-            {decision.candidates.length > 0 && <ul className="mt-3 space-y-1 text-xs text-slate-600">{decision.candidates.map((candidate) => <li key={candidate.action}>{candidate.feasible ? '✓' : '—'} {candidate.action}: {candidate.reason}</li>)}</ul>}
-            {decision.impact && <p className="mt-3 text-[11px] text-slate-500">Recorded ledger: ${numberValue(decision.impact.cost_saved)} cost · {numberValue(decision.impact.distance_avoided_km)} km · {numberValue(decision.impact.carbon_avoided_kg)} kg CO₂e</p>}
-          </>}
-        </div>
-        <div className="flex flex-wrap content-start gap-2">
-          {selected.decision_status === 'PROCESSING' && <button disabled={busy} onClick={() => void runAction(() => backendApi.evaluateRecovery(selected.event_id), 'Recovery evaluation completed.')} className="rounded-lg bg-amber-400 px-3 py-2 text-xs font-bold disabled:opacity-50">Evaluate recovery</button>}
-          {selected.decision_id && isAwaitingApproval(selected.decision_status) && <>
-            <button disabled={busy} onClick={() => void runAction(() => backendApi.approveDecision(selected.decision_id!), 'Decision approved.')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Approve</button>
-            <button disabled={busy} onClick={() => void runAction(() => backendApi.rejectDecision(selected.decision_id!), 'Decision rejected.')} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold disabled:opacity-50">Reject</button>
-          </>}
-          {selected.decision_id && selected.decision_status === 'APPROVED' && <button disabled={busy} onClick={() => void runAction(() => backendApi.executeDecision(selected.decision_id!), 'Simulation executed. No real orders or parcels were changed.')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">Execute simulation</button>}
-        </div>
-      </section>}
-
-      <p className="text-[11px] text-slate-500">{metrics ? `${numberValue(metrics.recorded_impact_records)} impact ledger records. ${numberValue(metrics.recorded_distance_avoided_km)} km and ${numberValue(metrics.recorded_carbon_avoided_kg)} kg CO₂e are recorded totals, not independently verified savings.` : ''}</p>
-    </main>
-  );
-}
+export const OperationsDashboard:React.FC=()=>{
+ const {events,selectedId,selectedEvent:event,setSelectedId,loading,error,updateStatus:sharedUpdateStatus,audit,scenarioResult,setScenarioResult,source}=useOperations();
+ const [search,setSearch]=useState(''); const [filter,setFilter]=useState('All'); const [scenario,setScenario]=useState<ScenarioId>('nearby');
+ const filtered=useMemo(()=>events.filter(e=>(filter==='All'||e.status===filter)&&`${e.id} ${e.orderId} ${e.parcelId} ${e.product} ${e.pincode}`.toLowerCase().includes(search.toLowerCase())),[events,filter,search]);
+ const impact=event?calculateImpact(event):null;
+ const compatibleMatches=event?getCompatibleMockOrders(event):[];
+ const changeStatus=async(status:EventStatus,actor:Actor)=>{await sharedUpdateStatus(status,actor);};
+ const runScenario=()=>{if(!event)return;const result=evaluateScenario(scenario,event,events);const {conventional,smart,savings}=result.impact;setScenarioResult(`${SCENARIOS.find(s=>s.id===scenario)?.label}: ${result.decision} Conventional estimate ${conventional.co2Kg.toFixed(2)} kg CO₂e, ${conventional.fuelL.toFixed(2)} L, ${conventional.distanceKm.toFixed(1)} km, ${conventional.partnerMinutes} min, ${formatINR(conventional.costInr)}. Recovery estimate ${smart.co2Kg.toFixed(2)} kg CO₂e, ${smart.fuelL.toFixed(2)} L, ${smart.distanceKm.toFixed(1)} km, ${smart.partnerMinutes} min, ${formatINR(smart.costInr)}. Potential differences: ${savings.co2Kg.toFixed(2)} kg CO₂e, ${savings.fuelL.toFixed(2)} L, ${savings.distanceKm.toFixed(1)} km, ${savings.partnerMinutes} min, ${formatINR(savings.costInr)}. Simulation only; event status was not changed.`);};
+ const actionLabel=event?.status==='Matched'?'Execute reassignment':event?.status==='On hold'?(canMatchHeldParcel(event)?'Confirm compatible match':'Route to warehouse fallback'):event?.status==='Approved'?(canPlaceOnHold(event,events).allowed?'Place on hub hold':'Route to warehouse fallback'):event&&canPlaceOnHold(event,events).allowed?'Approve recommendation':'Route to warehouse fallback';
+ const nextActionStatus=(current:EventStatus):EventStatus=>{if(current==='Matched')return 'Executed';if(current==='On hold')return event&&canMatchHeldParcel(event)?'Matched':'Fallback';if(current==='Approved')return event&&canPlaceOnHold(event,events).allowed?'On hold':'Fallback';return event&&canPlaceOnHold(event,events).allowed?'Approved':'Fallback';};
+ const timeline=event?[['Cancellation',true,'completed'],['Evaluation',true,'completed'],['Recommendation',true,'completed'],['Approval',event.status==='Approved'||event.status==='On hold'||event.status==='Matched'||event.status==='Executed','pending'],['Hub hold',event.status==='On hold'||event.status==='Matched'||event.status==='Executed','simulated'],['Compatible match',event.status==='Matched'||event.status==='Executed','predicted'],['Reassignment / return',event.status==='Executed'||event.status==='Fallback','pending'],['Execution',event.status==='Executed','pending']] as [string,boolean,string][]:[];
+ return <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-7 space-y-6">
+  <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-3"><div><div className="flex items-center gap-2 text-[11px] text-slate-500"><span className="w-2 h-2 rounded-full bg-amber-500"/> OPERATIONS CONTROL ROOM</div><h1 className="text-2xl sm:text-3xl font-bold mt-1">Cancellation recovery dashboard</h1><p className="text-sm text-slate-600 mt-1">One selected event drives impact estimates, decision guidance, hub eligibility, and lifecycle.</p></div><span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900"><span className="h-2 w-2 rounded-full bg-amber-500"/>{source}</span></header>
+  {error&&<div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">{error}</div>}
+  {loading?<div className="rounded-2xl bg-white p-10 text-center text-sm text-slate-500">Loading cancellation events…</div>:<>
+  <section className="grid grid-cols-2 xl:grid-cols-4 gap-3">{[['Events',events.length],['Awaiting review',events.filter(e=>e.status==='New'||e.status==='Evaluated').length],['Eligible parcels',events.filter(e=>e.eligible).length],['Confirmed executed',events.filter(e=>e.status==='Executed').length]].map(([l,v])=><div key={String(l)} className="bg-white border border-slate-200 rounded-xl p-4"><div className="text-xs text-slate-500">{l}</div><div className="text-2xl font-bold mt-1">{v}</div><div className="text-[10px] text-slate-400 mt-1">Current mock dataset</div></div>)}</section>
+  <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden"><div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between"><div><h2 className="font-bold text-sm">Cancellation events</h2><p className="text-[11px] text-slate-500 mt-0.5">Choose an event to refresh every detail panel.</p></div><div className="flex gap-2"><label className="relative"><Search className="absolute left-2 top-2 w-3.5 h-3.5 text-slate-400"/><input aria-label="Search events" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search event, parcel…" className="pl-7 pr-2 py-1.5 border rounded-lg text-xs w-48"/></label><select aria-label="Filter by status" value={filter} onChange={e=>setFilter(e.target.value)} className="border rounded-lg px-2 text-xs"><option>All</option>{['Evaluated','Approved','On hold','Matched','Executed','Fallback','Rejected'].map(s=><option key={s}>{s}</option>)}</select></div></div><div className="overflow-x-auto"><table className="w-full text-left text-xs min-w-[730px]"><thead className="bg-slate-50 text-slate-500"><tr>{['Event / order','Parcel / product','Stage · score','Hub / pincode','Status'].map(x=><th key={x} className="px-4 py-2.5 font-semibold">{x}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{filtered.map(e=><tr key={e.id} onClick={()=>setSelectedId(e.id)} className={`cursor-pointer hover:bg-amber-50/50 ${selectedId===e.id?'bg-amber-50':''}`} aria-selected={selectedId===e.id}><td className="px-4 py-3"><b>{e.id}</b><div className="text-slate-500 mt-0.5">{e.orderId} · {e.cancelledAt}</div></td><td className="px-4 py-3"><b>{e.parcelId}</b><div className="text-slate-500 mt-0.5">{e.product}</div></td><td className="px-4 py-3">{e.stage}<div className="text-slate-500 mt-0.5">Score {e.score}/100</div></td><td className="px-4 py-3">{e.hub}<div className="text-slate-500 mt-0.5">{e.pincode}</div></td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 font-semibold ${badge(e.status)}`}>{e.status}</span></td></tr>)}</tbody></table>{filtered.length===0&&<div className="p-8 text-center text-sm text-slate-500">No cancellation events match these filters.</div>}</div></section>
+  {!event||!impact?<div className="p-8 bg-white rounded-xl text-sm text-slate-500">Select a cancellation event to inspect its recovery path.</div>:<>
+  <section className="grid xl:grid-cols-3 gap-4"><div className="xl:col-span-2 bg-white border border-slate-200 rounded-2xl p-5"><div className="flex items-start justify-between gap-3"><div><div className="text-[10px] font-bold tracking-wider text-amber-700">CANCELLATION IMPACT · ESTIMATES</div><h2 className="text-lg font-bold mt-1">{event.product}</h2><p className="text-xs text-slate-500">{event.id} · conventional return vs SmartCancy recovery</p></div><span className="text-[10px] rounded-full px-2.5 py-1 bg-slate-100 text-slate-600">Illustrative simulation</span></div>
+   <div className="grid sm:grid-cols-2 gap-3 mt-5">{([['CO₂e','co2Kg','kg CO₂e'],['Fuel','fuelL','L'],['Distance','distanceKm','km'],['Partner time','partnerMinutes','min'],['Operational cost','costInr','INR']] as const).map(([label,key,unit])=>{const c=impact.conventional[key],s=impact.smart[key],max=Math.max(c,s,0.01);return <div key={key} className="rounded-xl border border-slate-100 p-3"><div className="flex justify-between text-xs font-semibold"><span>{label}</span><span className="text-emerald-700">Potential saving {key==='costInr'?formatINR(impact.savings[key]):`${fmt(impact.savings[key])} ${unit}`}</span></div><div className="grid grid-cols-2 gap-3 mt-2 text-[10px]"><div><div className="flex justify-between text-slate-500"><span>Conventional</span><b>{key==='costInr'?formatINR(c):`${fmt(c)} ${unit}`}</b></div><div className="h-2 bg-slate-100 rounded-full mt-1 overflow-hidden"><div className="h-full bg-slate-400 rounded-full" style={{width:`${Math.max(4,c/max*100)}%`}}/></div></div><div><div className="flex justify-between text-slate-500"><span>SmartCancy</span><b>{key==='costInr'?formatINR(s):`${fmt(s)} ${unit}`}</b></div><div className="h-2 bg-emerald-50 rounded-full mt-1 overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{width:`${Math.max(s?4:0,s/max*100)}%`}}/></div></div></div></div>})}</div>
+   <div className="mt-4 p-3 rounded-xl bg-emerald-50 text-xs text-emerald-950 flex gap-2"><Leaf className="w-4 h-4 shrink-0"/><span>{event.status==='Matched'||event.status==='Executed'?`A nearby recovery could avoid an estimated ${fmt(impact.savings.co2Kg)} kg CO₂e and ${fmt(impact.savings.distanceKm)} km of return travel for this parcel.`:'A recovery path may reduce return travel if an eligible match is confirmed. Current status does not confirm savings.'}</span></div><details className="mt-3 text-[10px] text-slate-500"><summary className="cursor-pointer font-semibold">Calculation assumptions and units</summary><p className="mt-1">Fuel {IMPACT_ASSUMPTIONS.fuelLPerKm} L/km · fleet emissions {IMPACT_ASSUMPTIONS.co2KgPerL} kg CO₂e/L · baseline return {IMPACT_ASSUMPTIONS.conventionalReturnKm} km. Partner minutes use per-event inputs; cost inputs are INR mock equivalents localized at a fixed illustrative 83:1 ratio. Estimates only; no measured savings or live telemetry.</p></details>
+  </div><aside className="bg-slate-900 text-white rounded-2xl p-5"><div className="text-[10px] font-bold tracking-wider text-amber-300">DECISION ENGINE · AI-ASSISTED</div><h2 className="text-lg font-bold mt-1">{event.score<=25?'Stop before dispatch':event.eligible&&event.sealVerified&&event.demand>=75?'Recommend hub hold and nearby match':'Use warehouse fallback'}</h2><p className="text-xs text-slate-300 mt-2">{event.score<=25?'Early cancellation avoids unnecessary downstream handling.':event.eligible&&event.sealVerified&&event.demand>=75?`Parcel is eligible, local demand is ${event.demand}/100, and hub ${event.hub} has capacity in the simulation.`:'Eligibility, demand, or capacity constraints do not support hub reassignment.'}</p><div className="mt-4 border-t border-slate-700 pt-3 space-y-2 text-[11px]"><div><b>Evidence</b><p className="text-slate-400">Score {event.score}/100 · seal {event.sealVerified?'verified':'not verified'} · demand {event.demand}/100 · {event.hubCapacity} slots capacity</p></div><div><b>Alternatives</b><p className="text-slate-400">Allow cancellation and return to warehouse; keep order if customer reverses cancellation.</p></div><div><b>Risks</b><p className="text-slate-400">Demand may expire; capacity and item eligibility must be revalidated at execution.</p></div><div><b>Expected outcome</b><p className="text-slate-400">{event.status==='Matched'?'Match confirmed in simulation; execution still requires confirmation.':'Recommendation only. Estimates remain potential until confirmed.'}</p></div></div><div className="flex flex-wrap gap-2 mt-4"><button disabled={event.status==='Executed'||event.status==='Rejected'||event.status==='Fallback'} onClick={()=>{const next=nextActionStatus(event.status);if(window.confirm(`${actionLabel} for ${event.id}?`))changeStatus(next,next==='Matched'?'AI-ASSISTED':'OPERATOR')}} className="rounded-lg bg-amber-400 text-slate-950 px-3 py-2 text-[11px] font-bold disabled:opacity-40">{actionLabel}</button><button disabled={event.status==='Executed'||event.status==='Rejected'} onClick={()=>{if(window.confirm(`Reject recommendation for ${event.id}?`))changeStatus('Rejected','OPERATOR')}} className="rounded-lg border border-slate-600 px-3 py-2 text-[11px] font-semibold disabled:opacity-40">Reject</button></div><p className="text-[10px] text-slate-400 mt-2">Hold → match → execution requires separate confirmations. Mock status is not a real backend dispatch.</p></aside></section>
+  <section className="grid lg:grid-cols-2 gap-4"><div className="bg-white border border-slate-200 rounded-2xl p-5"><div className="flex items-center justify-between"><div><h2 className="font-bold text-sm">Order lifecycle</h2><p className="text-[11px] text-slate-500">{event.orderId} · {event.parcelId}</p></div><span className={`text-[10px] rounded-full px-2 py-1 ${badge(event.status)}`}>{event.status}</span></div><div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">{timeline.map(([label,done,type],i)=><div key={label} className={`p-2.5 rounded-lg border ${done?'border-emerald-200 bg-emerald-50':'border-slate-200 bg-slate-50'}`}><div className="flex items-center gap-1.5 text-[10px] font-semibold">{done?<Check className="w-3 h-3 text-emerald-600"/>:<Clock3 className="w-3 h-3 text-slate-400"/>}{label}</div><div className="text-[9px] uppercase text-slate-500 mt-1">{done?'completed':type}</div></div>)}</div></div>
+   <div className="bg-white border border-slate-200 rounded-2xl p-5"><div className="flex items-center justify-between"><div><h2 className="font-bold text-sm">Hub & route readiness</h2><p className="text-[11px] text-slate-500">Selected event · {event.hub} / {event.pincode}</p></div><Package className="w-5 h-5 text-amber-600"/></div><div className="grid grid-cols-3 gap-2 mt-4"><div className="rounded-lg bg-slate-50 p-2.5"><div className="text-[10px] text-slate-500">Route</div><b className="text-xs">{event.distanceKm} km</b></div><div className="rounded-lg bg-slate-50 p-2.5"><div className="text-[10px] text-slate-500">Hub capacity</div><b className="text-xs">{events.filter(e=>e.hub===event.hub&&(e.status==='On hold')).length}/{event.hubCapacity} held</b></div><div className="rounded-lg bg-slate-50 p-2.5"><div className="text-[10px] text-slate-500">Hold expiry</div><b className="text-xs">{event.eligible?`${event.holdHours} h max`:'Not eligible'}</b></div></div><div className="mt-3 rounded-lg bg-slate-50 p-3"><div className="text-[10px] font-semibold">Compatible mock demand ({compatibleMatches.length})</div>{compatibleMatches.length?compatibleMatches.map(match=><div key={match.id} className="text-[10px] text-slate-600 mt-1">{match.id} · {match.product} · {match.pincode} · demand {match.demand}/100</div>):<div className="text-[10px] text-slate-500 mt-1">No compatible order at this pincode/category. Use fallback.</div>}</div><div className="flex items-start gap-2 mt-3 text-[11px]">{canPlaceOnHold(event,events).allowed?<ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0"/>:<AlertTriangle className="w-4 h-4 text-amber-600 shrink-0"/>}<span>{canPlaceOnHold(event,events).allowed?'Eligible category, verified seal, compatible demand, rack slot, and hub capacity are available in the mock data.':canPlaceOnHold(event,events).reasons.join('; ')}</span></div><div className="flex gap-2 mt-3 text-[10px] text-slate-500"><Truck className="w-3.5 h-3.5"/> Current event route and shared simulated capacity; no live maps or inventory API connected.</div></div></section>
+  <section className="grid lg:grid-cols-3 gap-4"><div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5"><div className="flex items-center justify-between gap-2"><div><h2 className="font-bold text-sm">Deterministic scenario simulator</h2><p className="text-[11px] text-slate-500">Run, reset, or replay an explicit scenario.</p></div><Zap className="w-5 h-5 text-amber-500"/></div><div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2 mt-4">{SCENARIOS.map(s=><button key={s.id} onClick={()=>setScenario(s.id)} className={`text-left p-2.5 rounded-lg border ${scenario===s.id?'border-amber-400 bg-amber-50':'border-slate-200'}`}><div className="text-[11px] font-bold">{s.label}</div><div className="text-[10px] text-slate-500 mt-1">{s.description}</div></button>)}</div><div className="flex gap-2 mt-3"><button onClick={runScenario} className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold">Run scenario</button><button onClick={()=>{setScenarioResult('');setScenario('nearby')}} className="px-3 py-2 rounded-lg border text-xs font-semibold"><RotateCcw className="inline w-3 h-3 mr-1"/>Reset</button><button onClick={runScenario} className="px-3 py-2 rounded-lg border text-xs font-semibold">Replay</button></div>{scenarioResult&&<div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs"><b>Decision explanation:</b> {scenarioResult}<div className="text-[10px] text-slate-500 mt-1">Scenario is deterministic and simulated; no backend action was executed.</div></div>}</div>
+   <aside className="bg-white border border-slate-200 rounded-2xl p-5"><h2 className="font-bold text-sm">Decision history & health</h2><div className="mt-3 rounded-lg bg-emerald-50 text-emerald-800 p-2.5 text-[10px] flex gap-2"><Check className="w-3.5 h-3.5"/> API: Mock adapter available · loading complete</div><div className="mt-3 space-y-2 max-h-56 overflow-auto">{audit.filter(a=>a.eventId===event.id).map(a=><div key={a.id} className="border-l-2 border-amber-400 pl-2 py-1"><div className="text-[10px] font-bold">{a.actor} · {a.action}</div><div className="text-[10px] text-slate-500">{a.at} · {a.outcome}</div></div>)}{audit.filter(a=>a.eventId===event.id).length===0&&<div className="text-[11px] text-slate-500">No decisions recorded for {event.id}.</div>}</div><p className="text-[10px] text-slate-400 mt-3">Audit entries persist in this page session only.</p></aside></section>
+  </>}</>}
+ </main>;
+};

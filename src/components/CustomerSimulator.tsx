@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { DemoProduct, FulfillmentStageId } from '../types/smartCancel';
 import { DEMO_PRODUCTS, FULFILLMENT_STAGES } from '../data/mockData';
 import { Check, ArrowRight, ShieldCheck, HelpCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { calculateImpact } from '../utils/impact';
+import { useOperations } from '../context/OperationsContext';
+import { canPlaceOnHold, getCompatibleMockOrders } from '../utils/hubConstraints';
+import { formatINR } from '../utils/locale';
 
 interface CustomerSimulatorProps {
   onCancelComplete?: (data: {
@@ -16,12 +20,23 @@ interface CustomerSimulatorProps {
 export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
   onCancelComplete,
 }) => {
+  const { selectedEvent, events, updateSelectedEvent } = useOperations();
   const [selectedProduct, setSelectedProduct] = useState<DemoProduct>(DEMO_PRODUCTS[0]);
   const [selectedStage, setSelectedStage] = useState<FulfillmentStageId>('last_mile');
   const [currentScreen, setCurrentScreen] = useState<'tracker' | 'impact_card' | 'confirmation' | 'order_kept'>('tracker');
   const [isMatching, setIsMatching] = useState(false);
   const [matchFound, setMatchFound] = useState(false);
   const [trackingModalOpen, setTrackingModalOpen] = useState(false);
+  useEffect(() => {
+    if (!selectedEvent) return;
+    const product = DEMO_PRODUCTS.find((item) => selectedEvent.product.toLowerCase().includes(item.name.split(' ')[0].toLowerCase()));
+    if (product) setSelectedProduct(product);
+    const stage = selectedEvent.score <= 25 ? 'ordered' : selectedEvent.score <= 50 ? 'packed' : selectedEvent.score <= 75 ? 'in_transit' : 'last_mile';
+    setSelectedStage(stage);
+    setCurrentScreen('tracker');
+    setMatchFound(false);
+    setIsMatching(false);
+  }, [selectedEvent?.id]);
 
   // Dynamic calculations based on stage & product
   const stageIndex = FULFILLMENT_STAGES.findIndex((s) => s.id === selectedStage);
@@ -46,6 +61,25 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
       ? Math.round(selectedProduct.co2SavedKg * 0.6 * 100) / 100
       : selectedProduct.co2SavedKg;
 
+  const customerImpact = selectedEvent ? calculateImpact({
+    ...selectedEvent,
+    distanceKm: extraDistance,
+    score: currentStageObj.defaultScore,
+    partnerMinutes: selectedStage === 'last_mile' ? 24 : selectedStage === 'in_transit' ? 12 : 0,
+    conventionalCostInr: selectedStage === 'ordered' ? 33 : selectedStage === 'packed' ? 183 : selectedStage === 'in_transit' ? 481 : 697,
+    smartCostInr: selectedStage === 'ordered' ? 33 : 257,
+    eligible: selectedProduct.isEligible && selectedStage !== 'ordered' && selectedEvent.eligible,
+    status: 'Evaluated',
+  }) : null;
+  const taglines = selectedStage === 'ordered'
+    ? ['Plot twist: your parcel might still have a second destination. 👀', 'Your plans changed. Can your parcel have a plan B?']
+    : selectedStage === 'packed'
+    ? ['Your parcel is ready for a career change. Maybe another doorstep?', 'Before this parcel takes the scenic route back, let’s check its options. 🚚']
+    : selectedProduct.isEligible
+    ? ['One cancellation, potentially fewer kilometres. The planet appreciates the plot twist. 🌱', 'Plot twist: your parcel might still have a second destination. 👀']
+    : ['Your plans changed. We’ll check the safe return route for your parcel.', 'Before this parcel takes the scenic route back, let’s check its options. 🚚'];
+  const tagline = taglines[selectedProduct.id.length % taglines.length];
+
   const getStageMessage = () => {
     switch (selectedStage) {
       case 'ordered':
@@ -65,14 +99,6 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
     if (selectedStage === 'ordered') {
       setCurrentScreen('confirmation');
       setMatchFound(false);
-      if (onCancelComplete) {
-        onCancelComplete({
-          product: selectedProduct,
-          stage: selectedStage,
-          nudgeAction: 'cancel',
-          matched: false,
-        });
-      }
       return;
     }
     // Otherwise show impact card (Layer 1)
@@ -80,6 +106,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
   };
 
   const handleKeepOrder = () => {
+    updateSelectedEvent({customerKept:true});
     setCurrentScreen('order_kept');
     confetti({
       particleCount: 50,
@@ -98,20 +125,16 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
   };
 
   const handleCancelAnyway = () => {
+    updateSelectedEvent({customerKept:false});
     setCurrentScreen('confirmation');
     setIsMatching(true);
 
     // If product is eligible, simulate finding a local match
-    if (selectedProduct.isEligible) {
+    const canMatch = selectedStage !== 'ordered' && selectedProduct.isEligible && Boolean(selectedEvent && getCompatibleMockOrders(selectedEvent).length>0 && canPlaceOnHold(selectedEvent,events).allowed);
+    if (canMatch) {
       setTimeout(() => {
         setIsMatching(false);
         setMatchFound(true);
-        confetti({
-          particleCount: 70,
-          spread: 80,
-          origin: { y: 0.6 },
-          colors: ['#10B981', '#059669', '#34D399'],
-        });
       }, 1600);
     } else {
       setTimeout(() => {
@@ -120,14 +143,9 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
       }, 1200);
     }
 
-    if (onCancelComplete) {
-      onCancelComplete({
-        product: selectedProduct,
-        stage: selectedStage,
-        nudgeAction: 'cancel',
-        matched: selectedProduct.isEligible,
-      });
-    }
+    const complete = (matched:boolean) => onCancelComplete?.({product:selectedProduct,stage:selectedStage,nudgeAction:'cancel',matched});
+    if (!canMatch) setTimeout(() => complete(false), 1200);
+    else setTimeout(() => complete(true), 1600);
   };
 
   const handleResetToTracker = () => {
@@ -141,7 +159,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
       {/* Editorial Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-          <span>Amazon Hackathon Prototype</span>
+          <span>SmartCancy India Prototype</span>
           <span aria-hidden="true">·</span>
           <span>Section 5</span>
           <span aria-hidden="true">·</span>
@@ -173,6 +191,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                   key={prod.id}
                   onClick={() => {
                     setSelectedProduct(prod);
+                    updateSelectedEvent({product:prod.name,category:prod.category,pincode:prod.hubPincode,eligible:prod.isEligible,distanceKm:prod.extraDistanceKm,demand:prod.demandRate==='high'?88:prod.demandRate==='medium'?65:35});
                     handleResetToTracker();
                   }}
                   className={`w-full text-left p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer ${
@@ -186,7 +205,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                     <div>
                       <div className="text-sm font-medium text-slate-900">{prod.name}</div>
                       <div className="text-xs text-slate-500">
-                        {prod.category} · ${prod.price.toFixed(2)}
+                        {prod.category} · {formatINR(prod.price)}
                       </div>
                     </div>
                   </div>
@@ -226,6 +245,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                   key={stg.id}
                   onClick={() => {
                     setSelectedStage(stg.id);
+                    updateSelectedEvent({score:stg.defaultScore,stage:stg.name.replace(/^Level \d: /,''),distanceKm:stg.id==='ordered'?0:stg.id==='packed'?1.5:stg.id==='in_transit'?selectedProduct.extraDistanceKm*.6:selectedProduct.extraDistanceKm});
                     handleResetToTracker();
                   }}
                   className={`p-3 rounded-lg border text-left cursor-pointer transition-all ${
@@ -286,7 +306,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
             <div className="bg-white rounded-[32px] overflow-hidden min-h-[660px] flex flex-col justify-between border border-slate-100 relative">
               {/* Phone Status Bar */}
               <div className="px-6 pt-3 pb-2 flex items-center justify-between text-xs font-semibold text-slate-800 select-none">
-                <span>9:41</span>
+                <span>9:41 IST</span>
                 <div className="w-20 h-4 bg-slate-900 rounded-full mx-auto" />
                 <div className="flex items-center gap-1.5 text-[10px]">
                   <span>5G</span>
@@ -319,7 +339,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                           {selectedProduct.deliveryTimeText}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                          Qty: 1 · Total: ${selectedProduct.price.toFixed(2)}
+                          Qty: 1 · Total: {formatINR(selectedProduct.price)}
                         </p>
                       </div>
                     </div>
@@ -415,41 +435,23 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                           <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wide">
                             Before you cancel
                           </h4>
-                          <p className="text-xs text-amber-900 mt-0.5">
-                            This parcel is already on its way. Here is the physical footprint if cancelled:
-                          </p>
+                          <p className="text-xs text-amber-900 mt-0.5">{tagline}</p>
+                          <p className="text-[10px] text-amber-800 mt-1">Estimates only. Recovery remains potential until a compatible match is confirmed. You can cancel now or go back.</p>
                         </div>
 
-                        {/* Real Numbers Metrics Table (Page 5 Mock 2) */}
-                        <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white shadow-xs">
-                          <div className="p-3 flex items-center justify-between">
-                            <span className="text-xs text-slate-600">Extra distance</span>
-                            <span className="text-xs font-mono font-bold text-slate-900 tabular-nums">
-                              ~{extraDistance} km
-                            </span>
-                          </div>
-                          <div className="p-3 flex items-center justify-between">
-                            <span className="text-xs text-slate-600">CO₂ from extra trip</span>
-                            <span className="text-xs font-mono font-bold text-slate-900 tabular-nums">
-                              ~{co2Extra} kg
-                            </span>
-                          </div>
-                          <div className="p-3 flex items-center justify-between">
-                            <span className="text-xs text-slate-600">Packaging wasted</span>
-                            <span className="text-xs font-medium text-slate-900">
-                              {selectedProduct.packagingDescription}
-                            </span>
-                          </div>
-                        </div>
-
-                        <p className="text-[11px] text-slate-400 text-center italic">
-                          Values calculated from actual routing distance & packaging mass.
-                        </p>
+                        {customerImpact ? <div className="grid grid-cols-2 gap-2">{([['CO₂e','co2Kg','kg'],['Fuel','fuelL','L'],['Distance','distanceKm','km'],['Partner time','partnerMinutes','min'],['Operational cost','costInr','INR']] as const).map(([label,key,unit])=><div key={key} className="rounded-lg border border-slate-200 bg-white p-2"><div className="text-[10px] font-semibold text-slate-700">{label}</div><div className="grid grid-cols-2 gap-1 mt-1 text-[9px]"><div><span className="text-slate-400 block">Conventional est.</span><b>{key==='costInr'?formatINR(customerImpact.conventional[key]):`${customerImpact.conventional[key].toFixed(1)} ${unit}`}</b></div><div><span className="text-emerald-700 block">Recovery est.</span><b>{key==='costInr'?formatINR(customerImpact.smart[key]):`${customerImpact.smart[key].toFixed(1)} ${unit}`}</b></div></div><div className="grid grid-cols-2 gap-1 mt-1"><div className="h-1.5 bg-slate-200 rounded"/><div className="h-1.5 bg-emerald-100 rounded overflow-hidden"><div className="h-full bg-emerald-500" style={{width:`${customerImpact.conventional[key] ? Math.min(100,customerImpact.smart[key]/customerImpact.conventional[key]*100) : 0}%`}}/></div></div><div className="text-[9px] text-slate-500 mt-1">Potential difference: {key==='costInr'?formatINR(customerImpact.savings[key]):`${customerImpact.savings[key].toFixed(1)} ${unit}`}</div></div>)}</div> : <div className="border rounded-lg p-3 text-xs text-slate-500">Estimate unavailable: no route or operating inputs are available.</div>}
+                        <p className="text-[10px] text-slate-500">Illustrative estimates use shared fleet factors; no savings are confirmed here. Packaging: {selectedProduct.packagingDescription}</p>
                       </div>
                     </div>
 
                     {/* Equal-sized Buttons (Page 5 rule) */}
                     <div className="space-y-2.5 pt-4">
+                      <button
+                        onClick={() => setCurrentScreen('tracker')}
+                        className="w-full py-2.5 px-4 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 font-semibold text-sm rounded-lg transition-colors cursor-pointer"
+                      >
+                        Go back
+                      </button>
                       <button
                         onClick={handleKeepOrder}
                         className="w-full py-3 px-4 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-sm rounded-lg transition-colors cursor-pointer shadow-xs"
@@ -459,9 +461,9 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
 
                       <button
                         onClick={handleCancelAnyway}
-                        className="w-full py-3 px-4 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 font-semibold text-sm rounded-lg transition-colors cursor-pointer"
+                        className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm rounded-lg transition-colors cursor-pointer"
                       >
-                        Cancel anyway
+                        Confirm cancellation
                       </button>
 
                       <p className="text-[11px] text-slate-400 text-center">
@@ -514,7 +516,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                             <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-bold">
                               ✓
                             </span>
-                            <span>Held at nearby hub ({selectedProduct.hubPincode})</span>
+                            <span>{matchFound ? `Held and matched in simulation (${selectedProduct.hubPincode})` : isMatching ? `Checking hub eligibility at ${selectedProduct.hubPincode}` : `Hub recovery is not confirmed (${selectedProduct.hubPincode})`}</span>
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -530,7 +532,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                               </span>
                             )}
                             <span className={matchFound ? 'text-slate-700 font-medium' : 'text-slate-500'}>
-                              {matchFound ? 'Matched to a close order' : selectedProduct.isEligible ? 'Scanning nearby demand signals...' : 'Ineligible for local match'}
+                              {matchFound ? 'Compatible match confirmed in simulation' : isMatching ? 'Checking compatible nearby demand…' : selectedProduct.isEligible ? 'No confirmed match; standard return remains available' : 'Ineligible for local match'}
                             </span>
                           </div>
 
@@ -545,7 +547,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                               </span>
                             )}
                             <span className={matchFound ? 'text-emerald-700 font-bold' : 'text-slate-400'}>
-                              {matchFound ? `Return trip avoided (${extraDistance} km saved)` : 'Return trip avoided'}
+                              {matchFound ? `Potential return travel reduction (about ${extraDistance} km)` : 'Potential savings are not confirmed'}
                             </span>
                           </div>
                         </div>
@@ -553,7 +555,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                         {/* Conditional Green Summary (UI rule: Savings shown only if a match is found) */}
                         {matchFound && (
                           <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 animate-in fade-in">
-                            <span className="font-bold">Green Impact:</span> Avoiding warehouse return saved{' '}
+                            <span className="font-bold">Simulated impact estimate:</span> A compatible match may avoid about{' '}
                             <strong>{extraDistance} km</strong> and <strong>{co2Extra} kg CO₂</strong>!
                           </div>
                         )}
@@ -567,7 +569,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
 
                       <div className="text-center mt-2">
                         <span className="text-[10px] text-slate-400">
-                          Savings shown only if a match is found
+                          Potential estimates only; not measured savings
                         </span>
                       </div>
                     </div>
@@ -692,7 +694,7 @@ export const CustomerSimulator: React.FC<CustomerSimulatorProps> = ({
                     🚐
                   </div>
                   <div className="text-xs font-semibold text-slate-800">
-                    Amazon Delivery Van · Driver nearby
+                    Delivery Partner Van · Driver nearby
                   </div>
                   <div className="text-[11px] text-slate-500">
                     Pincode {selectedProduct.hubPincode} · 4 stops away
