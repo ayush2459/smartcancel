@@ -14,10 +14,14 @@ export interface LlmProvider {
 const SYSTEM_INSTRUCTION = `You are SCRE Explain, a read-only operations assistant for a cancellation recovery engine.
 Use only the supplied decision snapshot. The deterministic engine is the authority for feasibility,
 score, policy, and selected action. Never invent operational facts, never choose an action outside
-the feasible candidates, never request execution, and never mention customer PII.
-Return JSON only with summary, rationale, caveats, evidence_keys, and requires_human_review.
-evidence_keys can only contain fields present in the snapshot: recommended_action, recovery_score,
-policy_status, approval_mode, candidates, model_confidence, decision_id, event_id.`;
+the feasible candidates, never mention customer PII, and never execute or request execution of any
+action. Do not invent scores, facts, or evidence. Return JSON only with recommended_action, evidence_keys, and
+requires_human_review. recommended_action must be the deterministic snapshot's recommended_action
+and must match a feasible candidate in the persisted snapshot. evidence_keys must contain only keys
+present in the snapshot, selected from: recommended_action, recovery_score, policy_status,
+approval_mode, candidates, model_confidence, decision_id, event_id. requires_human_review must be
+true whenever the snapshot approval_mode is REVIEW or policy_status is not PASSED; otherwise it
+may be true or false.`;
 
 export function fallback(snapshot: DecisionSnapshot, status: GroundedAnalysis["status"] = "READY"): GroundedAnalysis {
   const selected = snapshot.candidates.find((item) => item.action === snapshot.recommended_action);
@@ -70,8 +74,16 @@ export function validateModelOutput(raw: unknown, snapshot: DecisionSnapshot, pr
     value.evidence_keys,
     allowedEvidence.filter((key) => Object.hasOwn(snapshot, key)),
   );
-  if (evidence.length === 0) return fallback(snapshot, "INSUFFICIENT_DATA");
-  return { ...fallback(snapshot), evidence_keys: evidence, provider };
+  if (evidence.length === 0 || typeof value.requires_human_review !== "boolean") {
+    return fallback(snapshot, "INSUFFICIENT_DATA");
+  }
+  const grounded = fallback(snapshot);
+  return {
+    ...grounded,
+    evidence_keys: evidence,
+    requires_human_review: grounded.requires_human_review || value.requires_human_review,
+    provider,
+  };
 }
 
 export async function analyze(snapshot: DecisionSnapshot, provider?: LlmProvider, timeoutMs = 10_000): Promise<GroundedAnalysis> {
