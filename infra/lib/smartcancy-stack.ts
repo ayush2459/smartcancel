@@ -78,7 +78,7 @@ export class SmartCancyStack extends Stack {
     });
 
     const vpc = new ec2.Vpc(this, 'ApplicationVpc', {
-      maxAzs: 1,
+      maxAzs: 2,
       natGateways: 0,
       subnetConfiguration: [
         {

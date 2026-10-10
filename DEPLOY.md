@@ -10,7 +10,9 @@ been reviewed and approved.
 - AWS CLI profile: `smartcancy`
 - Target region: `ap-southeast-2` (Asia Pacific - Sydney)
 - AWS CLI authentication was verified locally with `aws sts get-caller-identity`.
-- No AWS application resources or CDK bootstrap resources have been created.
+- CDKToolkit has been bootstrapped in `ap-southeast-2`; it created the standard
+  CDK asset bucket, ECR repository, IAM roles, and SSM parameter.
+- The SmartCancy application stack has not been deployed.
 - The Launch with AWS migration service sign-in did not complete. This plan is
   prepared locally; the repository has not been uploaded to that service.
 - The app remains a prototype. Execution is simulation-only, and the database
@@ -31,9 +33,10 @@ is run:
    `/api/health/live`. HTTP API is the lower-cost, lower-latency choice over REST API;
    the app does not need REST-only features such as API keys, built-in caching, or WAF.
    It invokes Express through the Lambda adapter.
-4. **Database** - private, encrypted, single-AZ PostgreSQL RDS in one isolated subnet.
-   The Lambda security group is the only allowed database client. No NAT Gateway is
-   created. Single-AZ is a demo trade-off, not high availability.
+4. **Database** - private, encrypted, single-AZ PostgreSQL RDS in isolated subnets
+   spanning two Availability Zones (required for an RDS subnet group). The Lambda
+   security group is the only allowed database client. No NAT Gateway is created.
+   Single-AZ is a demo trade-off, not high availability.
 5. **Credentials and logs** - RDS generates a Secrets Manager secret; CloudFormation
    injects its password as a Lambda environment value, encrypted at rest by Lambda.
    Lambda and API access logs are retained for one week. Database secret rotation
@@ -127,16 +130,15 @@ Before provisioning:
 
 ## Build, review, and deployment sequence
 
-These commands have not been run against AWS:
+The following application-stack steps are still pending:
 
 1. Build and synthesize locally with `npm run infra:synth`. This command builds
    the frontend and runs `cdk synth --strict`; it does not contact AWS to create
    resources.
 2. Confirm the cost scenario and account Free plan/service eligibility before
    asking to bootstrap. The previous $25 alert is a notification, not a hard cap.
-3. If approved, bootstrap only `ap-southeast-2` using profile `smartcancy`.
-   Bootstrap creates deployment infrastructure (including an S3 bucket, roles,
-   and an SSM parameter) and may incur small charges.
+3. CDK bootstrap is already complete for `ap-southeast-2`; no other region was
+   bootstrapped.
 4. The first application deployment uses the default callback `http://localhost:3000/`.
    After the stack outputs `FrontendUrl`, run `cdk diff` with
    `-c cognitoCallbackUrl=https://<cloudfront-domain>/` and review it. The first
