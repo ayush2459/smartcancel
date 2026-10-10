@@ -12,7 +12,10 @@ been reviewed and approved.
 - AWS CLI authentication was verified locally with `aws sts get-caller-identity`.
 - CDKToolkit has been bootstrapped in `ap-southeast-2`; it created the standard
   CDK asset bucket, ECR repository, IAM roles, and SSM parameter.
-- The SmartCancy application stack has not been deployed.
+- The first SmartCancy application deployment failed because Cognito Lite does
+  not support refresh-token rotation. The failed CloudFormation stack and its
+  verified-empty retained Cognito user pool have been removed. The Cognito Lite
+  client configuration is corrected, but no application resources are deployed.
 - The Launch with AWS migration service sign-in did not complete. This plan is
   prepared locally; the repository has not been uploaded to that service.
 - The app remains a prototype. Execution is simulation-only, and the database
@@ -27,8 +30,9 @@ is run:
 1. **Frontend** - private S3 bucket with CloudFront Origin Access Control. CloudFront
    routes `/api*` to API Gateway and serves `/runtime-config.json` without caching.
 2. **Sign-in** - Cognito Lite User Pool, authorization-code flow with PKCE,
-   refresh-token rotation, and no public sign-up. The browser stores tokens in
-   cookies. Lite is set explicitly because the default for a new pool is Essentials.
+   no public sign-up, and a one-day refresh token. Lite does not support
+   refresh-token rotation. The browser stores tokens in cookies. Lite is set
+   explicitly because the default for a new pool is Essentials.
 3. **API** - API Gateway HTTP API with a JWT authorizer on every `/api` route except
    `/api/health/live`. HTTP API is the lower-cost, lower-latency choice over REST API;
    the app does not need REST-only features such as API keys, built-in caching, or WAF.

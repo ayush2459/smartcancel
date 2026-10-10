@@ -73,7 +73,6 @@ export class SmartCancyStack extends Stack {
       accessTokenValidity: Duration.minutes(15),
       idTokenValidity: Duration.minutes(15),
       refreshTokenValidity: Duration.days(1),
-      refreshTokenRotationGracePeriod: Duration.seconds(30),
       enableTokenRevocation: true,
     });
 
