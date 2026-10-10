@@ -13,9 +13,15 @@ import { ScoreCalculator } from './components/ScoreCalculator';
 import { ArchitectureViewer } from './components/ArchitectureViewer';
 import { MetricsAndRoi } from './components/MetricsAndRoi';
 import { IdeaDocument } from './components/IdeaDocument';
+import { OperationsDashboard } from './components/OperationsDashboard';
+import { OperationsProvider } from './context/OperationsContext';
+import { ConnectedEventBar } from './components/ConnectedEventBar';
+import { useOperations } from './context/OperationsContext';
+import { canPlaceOnHold } from './utils/hubConstraints';
 import confetti from 'canvas-confetti';
 
-export default function App() {
+function AppContent() {
+  const { updateStatus, selectedEvent, events, reset } = useOperations();
   const [activeTab, setActiveTab] = useState<TabKey>('app');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -26,7 +32,7 @@ export default function App() {
 
   const handleRunDemo = () => {
     showToast('Starting end-to-end Smart Cancel flow: Customer Mobile Simulator');
-    setActiveTab('app');
+    setActiveTab('customer');
     confetti({
       particleCount: 40,
       spread: 60,
@@ -36,7 +42,9 @@ export default function App() {
   };
 
   const handleReset = () => {
-    showToast('Simulation parameters restored to baseline.');
+    reset();
+    setActiveTab('app');
+    showToast('Mock event state, decision history, and scenario result restored to baseline.');
   };
 
   return (
@@ -59,15 +67,26 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {activeTab === 'app' && (
+        {activeTab === 'app' && <OperationsDashboard />}
+
+        {activeTab !== 'app' && activeTab !== 'document' && <ConnectedEventBar section={activeTab} />}
+
+        {activeTab === 'customer' && (
           <CustomerSimulator
             onCancelComplete={(data) => {
               if (data.nudgeAction === 'keep') {
                 showToast(`Nudge succeeded: Customer preserved order for ${data.product.name}!`);
               } else if (data.matched) {
-                showToast(`Local Re-Match Found! Saved ${data.product.extraDistanceKm} km return travel.`);
+                if (selectedEvent && canPlaceOnHold(selectedEvent,events).allowed) {
+                  showToast(`Simulated local match confirmed. Potential route reduction: about ${data.product.extraDistanceKm} km (estimate).`);
+                  void updateStatus('Approved', 'OPERATOR').then(()=>updateStatus('On hold', 'SYSTEM')).then(()=>updateStatus('Matched', 'AI-ASSISTED'));
+                } else {
+                  showToast('No hub capacity is available in this simulation; warehouse fallback selected.');
+                  void updateStatus('Fallback', 'SYSTEM');
+                }
               } else {
                 showToast(`Standard warehouse return initiated for ${data.product.name}.`);
+                void updateStatus(data.stage === 'ordered' ? 'Executed' : 'Fallback', 'SYSTEM');
               }
             }}
           />
@@ -108,3 +127,5 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() { return <OperationsProvider><AppContent /></OperationsProvider>; }
