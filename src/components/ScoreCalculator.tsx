@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { FULFILLMENT_STAGES } from '../data/mockData';
 import { ShieldCheck, Truck, Package, MapPin, Gauge } from 'lucide-react';
+import { useOperations } from '../context/OperationsContext';
 
 export const ScoreCalculator: React.FC = () => {
+  const { selectedEvent, updateSelectedEvent } = useOperations();
   const [selectedLevel, setSelectedLevel] = useState<number>(3); // 1 to 4
   const [distanceKm, setDistanceKm] = useState<number>(24);
   const [packagingType, setPackagingType] = useState<'envelope' | 'standard' | 'heavy'>('standard');
@@ -42,6 +44,8 @@ export const ScoreCalculator: React.FC = () => {
           A simple 0 to 100 score that tells us how costly it is to cancel at this moment. The customer sees it as an intuitive progress bar; the logistics system uses it to choose the cheapest operational action.
         </p>
       </div>
+
+      {selectedEvent && <div className="mb-5 rounded-xl border border-amber-200 bg-white p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"><div><div className="text-[10px] font-bold text-amber-700">SHARED SELECTED EVENT · {selectedEvent.id}</div><div className="text-sm font-semibold mt-1">Current event score: {selectedEvent.score}/100 · {selectedEvent.stage}</div><div className="text-[10px] text-slate-500">Local score controls below can be applied to this event.</div></div><button onClick={()=>updateSelectedEvent({score:calculatedScore,stage:currentStage.name.replace(/^Level \d: /,''),distanceKm})} className="px-3 py-2 rounded-lg bg-amber-400 text-slate-950 text-xs font-bold">Apply score to selected event</button></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: 3D Bar Representation (Figure 3 in PDF) */}

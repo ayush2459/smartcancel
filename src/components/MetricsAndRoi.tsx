@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
 import { RISKS_AND_ANSWERS } from '../data/mockData';
 import { TrendingDown, Leaf, DollarSign, RotateCcw, ShieldCheck, CheckCircle2, Sliders, AlertCircle } from 'lucide-react';
+import { useOperations } from '../context/OperationsContext';
+import { calculateImpact, IMPACT_ASSUMPTIONS } from '../utils/impact';
+import { formatINR } from '../utils/locale';
 
 export const MetricsAndRoi: React.FC = () => {
+  const { selectedEvent } = useOperations();
+  const eventImpact = selectedEvent ? calculateImpact(selectedEvent) : null;
   // Configurable pilot parameters
   const [dailyHubOrders, setDailyHubOrders] = useState<number>(25000);
   const [lateCancelRatePct, setLateCancelRatePct] = useState<number>(3.2); // 3.2% cancel late
@@ -20,12 +25,12 @@ export const MetricsAndRoi: React.FC = () => {
   // Environmental & Cost savings per day
   // Avoided round trips = retainedByNudge + rematchedLocally
   const totalSavedReturns = retainedByNudge + rematchedLocally;
-  const avgKmSavedPerUnit = 38.5; // km
+  const avgKmSavedPerUnit = IMPACT_ASSUMPTIONS.conventionalReturnKm;
   const totalKmSavedDaily = Math.round(totalSavedReturns * avgKmSavedPerUnit);
-  const totalCo2SavedKgDaily = Math.round(totalKmSavedDaily * 0.034); // ~34g CO2 per km for fleet van
-  const estimatedCostSavedPerReturn = 5.20; // $5.20 cost for return trip + inspection + restock
-  const dailyDollarSavings = Math.round(totalSavedReturns * estimatedCostSavedPerReturn);
-  const annualDollarSavings = Math.round(dailyDollarSavings * 365);
+  const totalCo2SavedKgDaily = Math.round(totalKmSavedDaily * IMPACT_ASSUMPTIONS.fuelLPerKm * IMPACT_ASSUMPTIONS.co2KgPerL);
+  const estimatedCostSavedPerReturn = Math.max(0, avgKmSavedPerUnit * IMPACT_ASSUMPTIONS.fuelLPerKm * IMPACT_ASSUMPTIONS.fuelInrPerL + IMPACT_ASSUMPTIONS.handlingInr - IMPACT_ASSUMPTIONS.rematchHandlingInr);
+  const dailyRupeeSavings = Math.round(totalSavedReturns * estimatedCostSavedPerReturn);
+  const annualRupeeSavings = Math.round(dailyRupeeSavings * 365);
   const annualCo2Tons = Math.round((totalCo2SavedKgDaily * 365) / 1000);
 
   // Risk filtering
@@ -50,35 +55,42 @@ export const MetricsAndRoi: React.FC = () => {
           Metrics, proof plan & financial ROI
         </h1>
         <p className="text-sm text-slate-600 mt-1 max-w-3xl">
-          Empirical validation model comparing traditional reverse logistics with Smart Cancel. Tune parameters to project scale across Amazon Delivery Stations.
+          Empirical validation model comparing traditional reverse logistics with Smart Cancel. Tune parameters to project scale across Indian delivery stations.
         </p>
       </div>
+
+      <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">All portfolio values below are scenario projections from adjustable adoption and match-rate inputs, not realized savings. Per-event comparisons use the shared impact assumptions above. INR values are localized mock equivalents at a fixed illustrative 83:1 ratio, not live exchange rates.</div>
+
+      {selectedEvent && eventImpact && <section className="mb-6 bg-white border border-amber-200 rounded-2xl p-5">
+        <div className="flex flex-col sm:flex-row sm:justify-between gap-2"><div><div className="text-[10px] font-bold text-amber-700">SELECTED EVENT · {selectedEvent.id} · {selectedEvent.status}</div><h2 className="font-bold text-base mt-1">Per-event impact estimate: {selectedEvent.product}</h2></div><span className="text-[10px] text-slate-500">Potential only · simulation</span></div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">{([['CO₂e','co2Kg','kg'],['Fuel','fuelL','L'],['Distance','distanceKm','km'],['Partner time','partnerMinutes','min'],['Operating cost','costInr','INR']] as const).map(([label,key,unit])=><div key={key} className="rounded-lg bg-slate-50 p-3"><div className="text-[10px] text-slate-500">{label}</div><div className="text-[10px] mt-1">Conventional: <b>{key==='costInr'?formatINR(eventImpact.conventional[key]):`${eventImpact.conventional[key].toFixed(1)} ${unit}`}</b></div><div className="text-[10px] text-emerald-700">Recovery estimate: <b>{key==='costInr'?formatINR(eventImpact.smart[key]):`${eventImpact.smart[key].toFixed(1)} ${unit}`}</b></div><div className="text-[9px] text-slate-500">Potential difference {key==='costInr'?formatINR(eventImpact.savings[key]):`${eventImpact.savings[key].toFixed(1)} ${unit}`}</div></div>)}</div>
+      </section>}
 
       {/* Top 4 Impact Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-            <span>Annual Cost Savings</span>
+            <span>Projected Annual Cost Savings</span>
             <DollarSign className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-            ${(annualDollarSavings / 1000).toFixed(0)}k
+            {formatINR(annualRupeeSavings)}
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            Across 1 pilot hub (${(dailyDollarSavings).toLocaleString()}/day)
+            Across 1 pilot hub ({formatINR(dailyRupeeSavings)}/day)
           </p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-            <span>CO₂ Averted Annually</span>
+            <span>Projected CO₂e Difference Annually</span>
             <Leaf className="w-4 h-4 text-emerald-600" />
           </div>
           <div className="text-2xl font-bold text-emerald-700 font-mono tabular-nums">
-            {annualCo2Tons.toLocaleString()} Metric Tons
+            {annualCo2Tons.toLocaleString('en-IN')} Metric Tons
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
-            {(totalCo2SavedKgDaily).toLocaleString()} kg CO₂ saved every day
+            {(totalCo2SavedKgDaily).toLocaleString('en-IN')} kg CO₂ saved every day
           </p>
         </div>
 
@@ -101,7 +113,7 @@ export const MetricsAndRoi: React.FC = () => {
             <RotateCcw className="w-4 h-4 text-blue-600" />
           </div>
           <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-            {totalKmSavedDaily.toLocaleString()} km
+            {totalKmSavedDaily.toLocaleString('en-IN')} km
           </div>
           <p className="text-[11px] text-slate-500 mt-1">
             Equal to {(totalKmSavedDaily / 400).toFixed(1)} delivery routes eliminated
@@ -124,7 +136,7 @@ export const MetricsAndRoi: React.FC = () => {
           <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-medium text-slate-800">
               <span>Daily Delivery Hub Volume:</span>
-              <span className="font-mono font-bold">{dailyHubOrders.toLocaleString()} orders</span>
+              <span className="font-mono font-bold">{dailyHubOrders.toLocaleString('en-IN')} orders</span>
             </div>
             <input
               type="range"
@@ -234,7 +246,7 @@ export const MetricsAndRoi: React.FC = () => {
                   <span className="font-mono font-bold text-rose-700">100% of cancels</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Avg Miles / Cancel:</span>
+                  <span className="text-slate-500 block">Avg km / Cancel:</span>
                   <span className="font-mono font-bold text-slate-700">42.0 km (Full return)</span>
                 </div>
               </div>
@@ -266,7 +278,7 @@ export const MetricsAndRoi: React.FC = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="text-emerald-800 block">Avg Miles Saved:</span>
+                  <span className="text-emerald-800 block">Avg km Saved:</span>
                   <span className="font-mono font-bold text-emerald-800">38.5 km saved</span>
                 </div>
               </div>
