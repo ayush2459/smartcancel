@@ -113,6 +113,7 @@ export class SmartCancyStack extends Stack {
       databaseName: 'smartcancy',
       credentials: rds.Credentials.fromGeneratedSecret('smartcancy_app'),
       allocatedStorage: 20,
+      storageType: rds.StorageType.GP3,
       storageEncrypted: true,
       publiclyAccessible: false,
       multiAz: false,
