@@ -83,7 +83,7 @@ In terminal 2, from the repository root:
 npm run dev
 ```
 
-Open http://localhost:3000. The frontend is currently a simulator with local data; it is **not yet fully wired to all backend endpoints**. Never put database credentials or a privileged API secret into Vite/client-side variables.
+Open http://localhost:3000. The Operations tab reads backend reports and supports cancellation intake, recovery evaluation, approval/rejection, and simulated execution. The Vite development server proxies `/api` to `http://127.0.0.1:8000`; set `SMARTCANCY_API_TARGET` only if the backend runs at another address. The Customer App tab remains a local demo and does not submit its sample orders to the backend. Never put database credentials or a privileged API secret into Vite/client-side variables.
 
 ## Backend API
 

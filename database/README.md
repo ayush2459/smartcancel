@@ -19,3 +19,14 @@ psql -h localhost -p 5432 -U smartcancy_app -d smartcancy -v ON_ERROR_STOP=1 -f 
 The database role needs permission to use the schema and the `pgcrypto` extension. If required, ask a PostgreSQL administrator to install that extension.
 
 **Never apply this bootstrap to FlowSense.** It is for a fresh SmartCancy database and is not idempotent for the enum/table definitions. Do not rerun it against an initialized database. Back up existing databases before deliberate migrations.
+
+## Synthetic dashboard data
+
+To populate an initialized SmartCancy database for a local frontend demonstration, run `seed-demo.sql` from the repository root:
+
+```bash
+psql -h localhost -p 5432 -U smartcancy_app -d smartcancy \
+  -v ON_ERROR_STOP=1 -f database/seed-demo.sql
+```
+
+The seed adds clearly labeled synthetic orders, customers, parcels, and cancellation workflows. It is separate from the schema bootstrap, safe to rerun, and does not overwrite workflow records already used. It does not add verified impact-ledger savings or real customer data.

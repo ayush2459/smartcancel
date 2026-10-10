@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Navbar, TabKey } from './components/Navbar';
 import { CustomerSimulator } from './components/CustomerSimulator';
+import { OperationsDashboard } from './components/OperationsDashboard';
 import { LogisticsVisualizer } from './components/LogisticsVisualizer';
 import { DecisionEngine } from './components/DecisionEngine';
 import { HubRackManager } from './components/HubRackManager';
@@ -17,6 +18,7 @@ import confetti from 'canvas-confetti';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('app');
+  const [demoKey, setDemoKey] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -26,7 +28,7 @@ export default function App() {
 
   const handleRunDemo = () => {
     showToast('Starting end-to-end Smart Cancel flow: Customer Mobile Simulator');
-    setActiveTab('app');
+    setActiveTab('customer');
     confetti({
       particleCount: 40,
       spread: 60,
@@ -36,7 +38,8 @@ export default function App() {
   };
 
   const handleReset = () => {
-    showToast('Simulation parameters restored to baseline.');
+    setDemoKey((key) => key + 1);
+    showToast('Customer demo reset. Backend records were not changed.');
   };
 
   return (
@@ -59,15 +62,18 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {activeTab === 'app' && (
+        {activeTab === 'app' && <OperationsDashboard />}
+
+        {activeTab === 'customer' && (
           <CustomerSimulator
+            key={demoKey}
             onCancelComplete={(data) => {
               if (data.nudgeAction === 'keep') {
-                showToast(`Nudge succeeded: Customer preserved order for ${data.product.name}!`);
+                showToast(`Local demo: customer kept ${data.product.name}. No backend request was sent.`);
               } else if (data.matched) {
-                showToast(`Local Re-Match Found! Saved ${data.product.extraDistanceKm} km return travel.`);
+                showToast(`Local demo match only for ${data.product.name}. No backend request was sent.`);
               } else {
-                showToast(`Standard warehouse return initiated for ${data.product.name}.`);
+                showToast(`Local demo completed for ${data.product.name}. No backend request was sent.`);
               }
             }}
           />

@@ -9,6 +9,7 @@ import { createReportsRouter } from './routes/reports.js';
 import { createApprovalRouter } from './routes/approvals.js';
 import { createExecutionRouter } from './routes/executions.js';
 import { createDecisionRouter } from './routes/decisions.js';
+import { createDemoRouter } from './demoRouter.js';
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../.env') });
 
@@ -48,14 +49,45 @@ pool.on('error', (error) => {
   console.error('Unexpected idle PostgreSQL client error:', error.message);
 });
 
+const allowDemoMode = process.env.SMARTCANCY_ALLOW_DEMO_MODE !== 'false';
+
+async function bootDatabaseMode() {
+  try {
+    await pool.query('SELECT 1');
+    console.log('PostgreSQL reachable; using production database routes.');
+    return true;
+  } catch (error) {
+    if (!allowDemoMode) {
+      console.error('PostgreSQL unavailable and demo mode is disabled. Refusing to start without a database.');
+      process.exit(1);
+    }
+    console.warn('PostgreSQL unavailable; falling back to demo mode.');
+    return false;
+  }
+}
+
+const postgresAvailable = await bootDatabaseMode();
+
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
-app.use('/api/v1/cancellations', createCancellationRouter(pool));
-app.use('/api/v1/recovery', createRecoveryRouter(pool));
-app.use('/api/v1/reports', createReportsRouter(pool));
-app.use('/api/v1/approvals', createApprovalRouter(pool));
-app.use('/api/v1/executions', createExecutionRouter(pool));
-app.use('/api/v1/decisions', createDecisionRouter(pool));
+
+const demoRouter = createDemoRouter();
+
+if (postgresAvailable) {
+  app.use('/api/v1/cancellations', createCancellationRouter(pool));
+  app.use('/api/v1/recovery', createRecoveryRouter(pool));
+  app.use('/api/v1/reports', createReportsRouter(pool));
+  app.use('/api/v1/approvals', createApprovalRouter(pool));
+  app.use('/api/v1/executions', createExecutionRouter(pool));
+  app.use('/api/v1/decisions', createDecisionRouter(pool));
+} else {
+  app.use('/api/v1/cancellations', demoRouter);
+  app.use('/api/v1/recovery', demoRouter);
+  app.use('/api/v1/reports', demoRouter);
+  app.use('/api/v1/approvals', demoRouter);
+  app.use('/api/v1/executions', demoRouter);
+  app.use('/api/v1/decisions', demoRouter);
+}
 
 app.get('/api/health/live', (_req, res) => {
   res.json({
@@ -65,6 +97,21 @@ app.get('/api/health/live', (_req, res) => {
 });
 
 app.get('/api/health', async (_req, res) => {
+  if (!postgresAvailable) {
+    return res.json({
+      status: 'ok',
+      service: 'smartcancy-backend',
+      database: {
+        status: 'connected',
+        name: process.env.DB_NAME || 'smartcancy',
+        mode: 'demo',
+        degraded: true,
+        note: 'PostgreSQL is unavailable in this environment; demo data is active.',
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   try {
     const result = await pool.query(`
       SELECT
