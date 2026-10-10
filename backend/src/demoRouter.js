@@ -166,6 +166,37 @@ export function createDemoRouter() {
     res.json(buildOverview());
   });
 
+  router.get('/hub-inventory', (_req, res) => {
+    res.json({
+      generated_at: new Date().toISOString(),
+      hubs: [],
+      held_parcels: [],
+      note: 'PostgreSQL is unavailable. Hub inventory is not available in demo fallback mode.',
+    });
+  });
+
+  router.get('/pilot-roi', (_req, res) => {
+    res.json({
+      generated_at: new Date().toISOString(),
+      pilot_id: 'BLR_DELHI_5',
+      origin_city: null,
+      destination_city: null,
+      distance_source: null,
+      road_distance_km_one_way: null,
+      orders: [],
+      energy_model: null,
+      totals: {
+        order_count: 0,
+        estimated_return_distance_km: 0,
+        recorded_impact_records: 0,
+        recorded_cost_saved: 0,
+        recorded_distance_avoided_km: 0,
+        recorded_carbon_avoided_kg: 0,
+      },
+      note: 'PostgreSQL is unavailable. Pilot and impact data are not available in demo fallback mode.',
+    });
+  });
+
   router.get('/cancellations', (req, res) => {
     const limit = Number.parseInt(req.query.limit ?? '20', 10) || 20;
     const offset = Number.parseInt(req.query.offset ?? '0', 10) || 0;

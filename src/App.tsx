@@ -72,7 +72,7 @@ function AppContent() {
       <main className="flex-1">
         {activeTab === 'app' && <OperationsDashboard />}
         {activeTab === 'backend' && <BackendOperationsDashboard />}
-        {activeTab !== 'app' && activeTab !== 'backend' && activeTab !== 'document' && <ConnectedEventBar section={activeTab} />}
+        {activeTab !== 'app' && activeTab !== 'backend' && activeTab !== 'document' && activeTab !== 'racks' && activeTab !== 'roi' && <ConnectedEventBar section={activeTab} />}
         {activeTab === 'customer' && (
           <CustomerSimulator
             key={demoKey}

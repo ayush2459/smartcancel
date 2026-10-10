@@ -69,6 +69,83 @@ export interface DecisionReport {
   } | null;
 }
 
+export interface HubInventory {
+  generated_at: string;
+  hubs: Array<{
+    hub_id: string;
+    code: string;
+    name: string;
+    pincode: string;
+    capacity: number;
+    status: string;
+    held_parcels: number;
+  }>;
+  held_parcels: Array<{
+    hub_id: string;
+    parcel_id: string;
+    parcel_number: string;
+    parcel_status: string;
+    seal_intact: boolean;
+    hold_until: string | null;
+    order_number: string;
+    destination_pincode: string;
+    product_name: string;
+    category: string | null;
+    demand_score: number | string;
+    orders_last_30d: number;
+    open_orders: number;
+    cart_count: number;
+  }>;
+  note: string;
+}
+
+export interface PilotRoiReport {
+  generated_at: string;
+  pilot_id: string;
+  origin_city: string | null;
+  destination_city: string | null;
+  distance_source: string | null;
+  road_distance_km_one_way: number | string | null;
+  orders: Array<{
+    event_id: string;
+    received_at: string;
+    stage_at_cancel: string;
+    origin_city: string | null;
+    destination_city: string | null;
+    road_distance_km_one_way: number | string | null;
+    distance_source: string | null;
+    order_number: string;
+    destination_pincode: string;
+    order_value: number | string;
+    parcel_number: string | null;
+    parcel_status: string | null;
+    selected_action: string | null;
+    decision_status: string | null;
+  }>;
+  energy_model: {
+    modeled_local_return_distance_km: number;
+    potential_avoided_fuel_liters: number;
+    potential_fuel_cost_inr: number;
+    potential_avoided_co2e_kg: number;
+    assumptions: {
+      local_return_km_per_order: number;
+      bike_mileage_km_per_liter: number;
+      petrol_price_inr_per_liter: number;
+      co2e_kg_per_liter: number;
+    };
+    note: string;
+  } | null;
+  totals: {
+    order_count: number;
+    estimated_return_distance_km: number | string;
+    recorded_impact_records: number;
+    recorded_cost_saved: number | string;
+    recorded_distance_avoided_km: number | string;
+    recorded_carbon_avoided_kg: number | string;
+  };
+  note: string;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
@@ -108,6 +185,12 @@ export const backendApi = {
 
   getOverview: () =>
     request<{ metrics: OverviewMetrics; impact_note: string }>('/v1/reports/overview'),
+
+  getHubInventory: () =>
+    request<HubInventory>('/v1/reports/hub-inventory'),
+
+  getPilotRoi: () =>
+    request<PilotRoiReport>('/v1/reports/pilot-roi'),
 
   getDecision: (decisionId: string) =>
     request<DecisionReport>(`/v1/reports/decisions/${encodeURIComponent(decisionId)}`),

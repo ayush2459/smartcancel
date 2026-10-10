@@ -29,4 +29,8 @@ psql -h localhost -p 5432 -U smartcancy_app -d smartcancy \
   -v ON_ERROR_STOP=1 -f database/seed-demo.sql
 ```
 
-The seed adds clearly labeled synthetic orders, customers, parcels, and cancellation workflows. It is separate from the schema bootstrap, safe to rerun, and does not overwrite workflow records already used. It does not add verified impact-ledger savings or real customer data.
+The seed adds clearly labeled synthetic orders, customers, parcels, and cancellation workflows, including five Bengaluru-to-Delhi pilot cases. It is separate from the schema bootstrap, safe to rerun, and does not overwrite workflow records already used.
+
+The five-order pilot stores a **2,150 km one-way planning estimate** in each synthetic cancellation event. This is not live routing, carrier telemetry, or a measured journey. The pilot report may show the sum as modeled return-distance exposure only; it is not distance saved.
+
+The pilot report separately calculates a **modeled local last-mile petrol-bike scenario**: five orders × 38.5 km assumed local return distance per order, ÷ 45 km/L illustrative bike mileage, × ₹112.05/L illustrative petrol price (the existing SmartCancy fuel-price assumption). This yields about ₹479 potential petrol cost avoided, conditional on those local return trips otherwise being required and actually avoided. It is not the Bengaluru–Delhi lane distance, a current pump-price quote, vehicle telemetry, or realized savings. CO₂e uses an illustrative 2.31 kg/L factor. Measured savings still come only from `impact_ledger`. The seed does not create ledger rows or represent synthetic demand signals and parcel flags as real observations.

@@ -165,4 +165,131 @@ WHERE NOT EXISTS (
     AND existing.action = demo.action::recovery_action
 );
 
+-- Five synthetic Bangalore-to-Delhi cancellation cases for the pilot views.
+-- 2,150 km is a planning assumption, not a measured route or carrier quote.
+INSERT INTO customers (external_ref, name, segment)
+SELECT demo.customer_ref, demo.customer_name, 'DEMO'
+FROM (VALUES
+  ('SC-BLR-DEL-CUSTOMER-01', 'Pilot Customer 01'),
+  ('SC-BLR-DEL-CUSTOMER-02', 'Pilot Customer 02'),
+  ('SC-BLR-DEL-CUSTOMER-03', 'Pilot Customer 03'),
+  ('SC-BLR-DEL-CUSTOMER-04', 'Pilot Customer 04'),
+  ('SC-BLR-DEL-CUSTOMER-05', 'Pilot Customer 05')
+) AS demo(customer_ref, customer_name)
+ON CONFLICT (external_ref) DO NOTHING;
+
+INSERT INTO products (sku, name, category, unit_value, weight_kg, eligible_for_rematch)
+VALUES
+  ('SC-PILOT-BLR-DEL-01', 'Pilot earbuds', 'Electronics', 4149, 0.280, TRUE),
+  ('SC-PILOT-BLR-DEL-02', 'Pilot e-reader', 'Electronics', 11619, 0.350, TRUE),
+  ('SC-PILOT-BLR-DEL-03', 'Pilot desk lamp', 'Household', 2034, 1.150, TRUE),
+  ('SC-PILOT-BLR-DEL-04', 'Pilot running shoes', 'Apparel', 9130, 0.920, FALSE),
+  ('SC-PILOT-BLR-DEL-05', 'Pilot water bottle', 'Household', 2449, 0.600, TRUE)
+ON CONFLICT (sku) DO NOTHING;
+
+INSERT INTO hubs (code, name, pincode, capacity, occupied_slots)
+VALUES
+  ('SC-PILOT-BLR1', 'Bengaluru Origin Hub (Synthetic Pilot)', '560001', 6, 0),
+  ('SC-PILOT-DEL1', 'Delhi Destination Hub (Synthetic Pilot)', '110001', 6, 0)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO orders (
+  order_number, customer_id, product_id, current_status, quantity,
+  order_value, destination_pincode
+)
+SELECT demo.order_number, customers.customer_id, products.product_id,
+       demo.current_status::order_status, 1, demo.order_value, '110001'
+FROM (VALUES
+  ('SC-BLR-DEL-0001', 'SC-BLR-DEL-CUSTOMER-01', 'SC-PILOT-BLR-DEL-01', 'HELD', 4149),
+  ('SC-BLR-DEL-0002', 'SC-BLR-DEL-CUSTOMER-02', 'SC-PILOT-BLR-DEL-02', 'HELD', 11619),
+  ('SC-BLR-DEL-0003', 'SC-BLR-DEL-CUSTOMER-03', 'SC-PILOT-BLR-DEL-03', 'OUT_FOR_DELIVERY', 2034),
+  ('SC-BLR-DEL-0004', 'SC-BLR-DEL-CUSTOMER-04', 'SC-PILOT-BLR-DEL-04', 'DISPATCHED', 9130),
+  ('SC-BLR-DEL-0005', 'SC-BLR-DEL-CUSTOMER-05', 'SC-PILOT-BLR-DEL-05', 'HELD', 2449)
+) AS demo(order_number, customer_ref, sku, current_status, order_value)
+JOIN customers ON customers.external_ref = demo.customer_ref
+JOIN products ON products.sku = demo.sku
+ON CONFLICT (order_number) DO NOTHING;
+
+INSERT INTO parcels (
+  parcel_number, order_id, status, current_hub_id, seal_intact,
+  damaged, irreversibility_score, hold_until
+)
+SELECT demo.parcel_number, orders.order_id,
+       demo.parcel_status::parcel_status, hubs.hub_id, TRUE, FALSE,
+       demo.irreversibility_score,
+       CASE WHEN demo.hold_hours IS NULL THEN NULL
+            ELSE now() + demo.hold_hours * interval '1 hour'
+       END
+FROM (VALUES
+  ('SC-BLR-DEL-PARCEL-0001', 'SC-BLR-DEL-0001', 'HELD', 78, 18),
+  ('SC-BLR-DEL-PARCEL-0002', 'SC-BLR-DEL-0002', 'HELD', 82, 42),
+  ('SC-BLR-DEL-PARCEL-0003', 'SC-BLR-DEL-0003', 'OUT_FOR_DELIVERY', 91, NULL),
+  ('SC-BLR-DEL-PARCEL-0004', 'SC-BLR-DEL-0004', 'IN_TRANSIT', 74, NULL),
+  ('SC-BLR-DEL-PARCEL-0005', 'SC-BLR-DEL-0005', 'HELD', 69, 30)
+) AS demo(parcel_number, order_number, parcel_status, irreversibility_score, hold_hours)
+JOIN orders ON orders.order_number = demo.order_number
+JOIN hubs ON hubs.code = 'SC-PILOT-DEL1'
+ON CONFLICT (parcel_number) DO NOTHING;
+
+INSERT INTO demand_signals (
+  pincode, product_id, orders_last_30d, open_orders, cart_count, demand_score
+)
+SELECT '110001', product_id, demo.orders_last_30d, demo.open_orders,
+       demo.cart_count, demo.demand_score
+FROM (VALUES
+  ('SC-PILOT-BLR-DEL-01', 8, 2, 3, 0.62),
+  ('SC-PILOT-BLR-DEL-02', 6, 1, 2, 0.54),
+  ('SC-PILOT-BLR-DEL-03', 4, 1, 2, 0.48),
+  ('SC-PILOT-BLR-DEL-04', 3, 0, 1, 0.31),
+  ('SC-PILOT-BLR-DEL-05', 5, 1, 2, 0.51)
+) AS demo(sku, orders_last_30d, open_orders, cart_count, demand_score)
+JOIN products ON products.sku = demo.sku
+ON CONFLICT (pincode, product_id) DO NOTHING;
+
+INSERT INTO cancellation_events (
+  idempotency_key, order_id, parcel_id, source, reason, stage_at_cancel,
+  occurred_at, received_at, payload
+)
+SELECT demo.idempotency_key, orders.order_id, parcels.parcel_id, 'OPERATOR',
+       'DEMO - synthetic Bangalore to Delhi pilot cancellation',
+       parcels.status, now() - demo.age, now() - demo.age,
+       jsonb_build_object(
+         'demo', TRUE,
+         'pilot_id', 'BLR_DELHI_5',
+         'origin_city', 'Bengaluru',
+         'destination_city', 'Delhi',
+         'road_distance_km_one_way', 2150,
+         'distance_source', 'Planning estimate; not live routing or carrier telemetry'
+       )
+FROM (VALUES
+  ('smartcancy-blr-delhi-5-1', 'SC-BLR-DEL-0001', interval '25 minutes'),
+  ('smartcancy-blr-delhi-5-2', 'SC-BLR-DEL-0002', interval '21 minutes'),
+  ('smartcancy-blr-delhi-5-3', 'SC-BLR-DEL-0003', interval '17 minutes'),
+  ('smartcancy-blr-delhi-5-4', 'SC-BLR-DEL-0004', interval '13 minutes'),
+  ('smartcancy-blr-delhi-5-5', 'SC-BLR-DEL-0005', interval '9 minutes')
+) AS demo(idempotency_key, order_number, age)
+JOIN orders ON orders.order_number = demo.order_number
+JOIN parcels ON parcels.order_id = orders.order_id
+ON CONFLICT (idempotency_key) DO NOTHING;
+
+INSERT INTO decisions (
+  event_id, selected_action, status, recovery_score, model_confidence,
+  policy_status, approval_mode, scoring_version, reasoning_summary, tool_trace
+)
+SELECT events.event_id, demo.action::recovery_action,
+       demo.status::decision_status, demo.score, demo.confidence,
+       'SYNTHETIC_PILOT', 'HUMAN_REVIEW', 'rules-v1',
+       demo.reason,
+       jsonb_build_object('demo', TRUE, 'execution_performed', FALSE)
+FROM (VALUES
+  ('smartcancy-blr-delhi-5-1', 'HOLD', 'REVIEW_REQUIRED', 72, 0.74, 'Synthetic case: held parcel requires operator review.'),
+  ('smartcancy-blr-delhi-5-2', 'HOLD', 'APPROVED', 78, 0.82, 'Synthetic case: held parcel approved for continued hold.'),
+  ('smartcancy-blr-delhi-5-3', 'TRANSFER', 'REVIEW_REQUIRED', 61, 0.71, 'Synthetic case: last-mile transfer requires operator review.'),
+  ('smartcancy-blr-delhi-5-4', 'CONTINUE', 'RECOMMENDED', 80, 0.86, 'Synthetic case: continuing in transit is recommended for review.'),
+  ('smartcancy-blr-delhi-5-5', 'HOLD', 'PROCESSING', NULL, NULL, 'Synthetic case: awaiting recovery evaluation.')
+) AS demo(idempotency_key, action, status, score, confidence, reason)
+JOIN cancellation_events events
+  ON events.idempotency_key = demo.idempotency_key
+ON CONFLICT (event_id) DO NOTHING;
+
 COMMIT;
