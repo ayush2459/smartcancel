@@ -12,8 +12,6 @@ import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
-import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
-import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -21,7 +19,6 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -34,7 +31,7 @@ export class SmartCancyStack extends Stack {
     const callbackOrigin = new URL(callbackUrl).origin;
     const callback = `${callbackOrigin}/`;
     const domainPrefix = this.node.tryGetContext('cognitoDomainPrefix')
-      ?? `smartcancy-aws-${this.account}`;
+      ?? `smartcancy-demo-${this.account}`;
 
     const userPool = new cognito.UserPool(this, 'Users', {
       userPoolName: 'smartcancy-demo-users',
@@ -139,7 +136,6 @@ export class SmartCancyStack extends Stack {
       depsLockFilePath: path.join(projectRoot, 'backend', 'package-lock.json'),
       timeout: Duration.seconds(28),
       memorySize: 512,
-      reservedConcurrentExecutions: 5,
       logGroup: apiFunctionLogs,
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
@@ -173,7 +169,6 @@ export class SmartCancyStack extends Stack {
       depsLockFilePath: path.join(projectRoot, 'backend', 'package-lock.json'),
       timeout: Duration.minutes(5),
       memorySize: 256,
-      reservedConcurrentExecutions: 1,
       logGroup: migrationFunctionLogs,
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
@@ -226,6 +221,49 @@ export class SmartCancyStack extends Stack {
       integration,
       authorizer: jwtAuthorizer,
     });
+    const siteBucket = new s3.Bucket(this, 'FrontendBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const frontendFunctionLogs = new logs.LogGroup(this, 'FrontendFunctionLogs', {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const frontendFunction = new nodejs.NodejsFunction(this, 'FrontendFunction', {
+      entry: path.join(projectRoot, 'backend', 'src', 'frontend.js'),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      depsLockFilePath: path.join(projectRoot, 'backend', 'package-lock.json'),
+      timeout: Duration.seconds(10),
+      memorySize: 256,
+      logGroup: frontendFunctionLogs,
+      environment: {
+        FRONTEND_BUCKET: siteBucket.bucketName,
+        COGNITO_USER_POOL_ID: userPool.userPoolId,
+        COGNITO_USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
+        COGNITO_DOMAIN: `https://${hostedDomain.domainName}`,
+      },
+      bundling: {
+        format: nodejs.OutputFormat.ESM,
+        minify: true,
+        sourceMap: false,
+      },
+    });
+    siteBucket.grantRead(frontendFunction);
+    const frontendIntegration = new HttpLambdaIntegration('FrontendIntegration', frontendFunction);
+    httpApi.addRoutes({
+      path: '/',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: frontendIntegration,
+    });
+    httpApi.addRoutes({
+      path: '/{proxy+}',
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration: frontendIntegration,
+    });
     new apigatewayv2.HttpStage(this, 'ApiDefaultStage', {
       httpApi,
       stageName: '$default',
@@ -242,104 +280,13 @@ export class SmartCancyStack extends Stack {
         })),
       },
     });
-
-    const siteBucket = new s3.Bucket(this, 'FrontendBucket', {
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true,
-      autoDeleteObjects: true,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
-    const spaRewrite = new cloudfront.Function(this, 'SpaRouteRewrite', {
-      code: cloudfront.FunctionCode.fromInline(`
-function handler(event) {
-  var request = event.request;
-  if (request.uri !== '/' && request.uri.indexOf('.') === -1) {
-    request.uri = '/index.html';
-  }
-  return request;
-}`),
-    });
-    const distribution = new cloudfront.Distribution(this, 'FrontendDistribution', {
-      defaultRootObject: 'index.html',
-      defaultBehavior: {
-        origin: origins.S3BucketOrigin.withOriginAccessControl(siteBucket),
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
-        functionAssociations: [
-          {
-            function: spaRewrite,
-            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
-          },
-        ],
-      },
-      additionalBehaviors: {
-        '/api*': {
-          origin: new origins.HttpOrigin(`${httpApi.apiId}.execute-api.${this.region}.amazonaws.com`),
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-        },
-        '/runtime-config.json': {
-          origin: origins.S3BucketOrigin.withOriginAccessControl(siteBucket),
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-        },
-      },
-    });
-
-    const runtimeConfigBody = JSON.stringify({
-      userPoolId: userPool.userPoolId,
-      userPoolClientId: userPoolClient.userPoolClientId,
-      domain: `https://${hostedDomain.domainName}`,
-    });
-    const runtimeConfig = new cr.AwsCustomResource(this, 'FrontendRuntimeConfig', {
-      installLatestAwsSdk: false,
-      onCreate: {
-        service: 'S3',
-        action: 'putObject',
-        parameters: {
-          Bucket: siteBucket.bucketName,
-          Key: 'runtime-config.json',
-          Body: runtimeConfigBody,
-          ContentType: 'application/json',
-          CacheControl: 'no-store',
-        },
-        physicalResourceId: cr.PhysicalResourceId.of('smartcancy-runtime-config'),
-      },
-      onUpdate: {
-        service: 'S3',
-        action: 'putObject',
-        parameters: {
-          Bucket: siteBucket.bucketName,
-          Key: 'runtime-config.json',
-          Body: runtimeConfigBody,
-          ContentType: 'application/json',
-          CacheControl: 'no-store',
-        },
-      },
-      onDelete: {
-        service: 'S3',
-        action: 'deleteObject',
-        parameters: {
-          Bucket: siteBucket.bucketName,
-          Key: 'runtime-config.json',
-        },
-      },
-      policy: cr.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: [siteBucket.arnForObjects('runtime-config.json')],
-      }),
-    });
-    runtimeConfig.node.addDependency(new s3deploy.BucketDeployment(this, 'FrontendDeployment', {
+    new s3deploy.BucketDeployment(this, 'FrontendDeployment', {
       sources: [s3deploy.Source.asset(path.join(projectRoot, 'dist'))],
       destinationBucket: siteBucket,
-      distribution,
-      distributionPaths: ['/*'],
-    }));
+    });
 
     new CfnOutput(this, 'FrontendUrl', {
-      value: `https://${distribution.distributionDomainName}`,
+      value: httpApi.apiEndpoint,
     });
     new CfnOutput(this, 'DatabaseEndpoint', {
       value: database.instanceEndpoint.hostname,
