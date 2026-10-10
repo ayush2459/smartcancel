@@ -8,7 +8,9 @@ SmartCancy is a prototype for reducing waste from late order cancellations. This
 
 - `src/` — React + TypeScript + Vite frontend and demo data.
 - `backend/` — Express API and PostgreSQL routes.
+- `infra/` — AWS CDK app for the Sydney deployment architecture.
 - `database/schema.sql` — schema-only bootstrap for a fresh SmartCancy database (16 tables, enums, indexes, triggers; no seed/customer data).
+- `DEPLOY.md` — staged AWS deployment plan, security prerequisites, and cost review gates.
 - `.github/workflows/ci.yml` — frontend/backend checks and API smoke tests.
 
 ## Prerequisites
@@ -125,13 +127,26 @@ Backend smoke tests expect the API at `http://127.0.0.1:8000`; override with `AP
 
 ## Production readiness checklist
 
-- **Authentication and authorization are not implemented.** Do not expose the API publicly or treat caller-provided `actor` values as verified identity. Add real authentication, role-based access control, and verified audit attribution before deployment.
+- **AWS sign-in uses Cognito for invited users and an API Gateway JWT authorizer.** Local development remains unauthenticated. The prototype does not yet distinguish viewer and operator permissions, so every invited account can reach the same API operations; caller-provided `actor` values are not verified audit identities.
 - **Frontend integration is incomplete.** Screens use demo data; connect them through a server-side integration layer before describing the product as fully integrated.
 - **Recovery scoring is a prototype.** `rules-v1` is not a trained/validated model. Calibrate cost, carbon factors, SLA risk, and confidence with operational data.
 - **Execution is simulation-only.** No real dispatch, rematching, label printing, refunds, or order/parcel mutation occurs.
 - Add request IDs, rate limiting, structured logs, monitoring, backup/restore drills, and a formal migration/versioning strategy.
 - Define retention, minimize personal data, and review privacy/access controls before real customer data is processed.
 - Publish only measured, auditable impact results; treat concept/ROI values as assumptions until validated.
+
+## AWS local preparation
+
+The AWS CDK stack targets `ap-southeast-2`. Build and synthesize without creating
+AWS resources:
+
+```bash
+npm run infra:synth
+```
+
+Read [DEPLOY.md](DEPLOY.md) for the service eligibility, pricing, bootstrap,
+two-stage Cognito callback, database initialization, and teardown gates. Do not
+run `cdk bootstrap` or `cdk deploy` until those reviews and approvals are complete.
 
 ## Safety
 

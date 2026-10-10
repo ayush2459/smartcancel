@@ -14,6 +14,7 @@ import { createDemoRouter } from './demoRouter.js';
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../.env') });
 
 const { Pool } = pg;
+const isLambda = Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
 const app = express();
 
 const requiredEnv = [
@@ -29,7 +30,9 @@ const missingEnv = requiredEnv.filter(
 );
 
 if (missingEnv.length > 0) {
-  console.error(`Missing backend environment variables: ${missingEnv.join(', ')}`);
+  const message = `Missing backend environment variables: ${missingEnv.join(', ')}`;
+  console.error(message);
+  if (isLambda) throw new Error(message);
   process.exit(1);
 }
 
@@ -43,6 +46,7 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
   application_name: 'smartcancy-backend',
+  ...(process.env.DB_SSL === 'true' ? { ssl: true } : {}),
 });
 
 pool.on('error', (error) => {
@@ -57,9 +61,10 @@ async function bootDatabaseMode() {
     console.log('PostgreSQL reachable; using production database routes.');
     return true;
   } catch (error) {
-    if (!allowDemoMode) {
-      console.error('PostgreSQL unavailable and demo mode is disabled. Refusing to start without a database.');
-      process.exit(1);
+    if (!allowDemoMode || isLambda) {
+      const message = 'PostgreSQL unavailable and demo mode is disabled. Refusing to start without a database.';
+      console.error(message, error.message);
+      throw new Error(message, { cause: error });
     }
     console.warn('PostgreSQL unavailable; falling back to demo mode.');
     return false;
@@ -141,24 +146,26 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-const port = Number(process.env.PORT || 8000);
-const server = app.listen(port, '127.0.0.1', () => {
-  console.log(`SmartCancy API listening on http://127.0.0.1:${port}`);
-  console.log(`Liveness: http://127.0.0.1:${port}/api/health/live`);
-  console.log(`Database health: http://127.0.0.1:${port}/api/health`);
-});
+export { app, pool };
 
-async function shutdown(signal) {
-  console.log(`${signal} received; shutting down...`);
-  server.close(async () => {
-    await pool.end();
-    process.exit(0);
+if (!isLambda) {
+  const port = Number(process.env.PORT || 8000);
+  const server = app.listen(port, '127.0.0.1', () => {
+    console.log(`SmartCancy API listening on http://127.0.0.1:${port}`);
+    console.log(`Liveness: http://127.0.0.1:${port}/api/health/live`);
+    console.log(`Database health: http://127.0.0.1:${port}/api/health`);
   });
+
+  async function shutdown(signal) {
+    console.log(`${signal} received; shutting down...`);
+    server.close(async () => {
+      await pool.end();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
-
-process.on('SIGINT', () => void shutdown('SIGINT'));
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-
-
 
 

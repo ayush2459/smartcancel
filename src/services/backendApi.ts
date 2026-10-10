@@ -1,3 +1,5 @@
+import { getCognitoAccessToken, isCognitoConfigured } from '../auth/cognito';
+
 const API_ROOT = '/api';
 
 export interface CancellationRecord {
@@ -147,12 +149,19 @@ export interface PilotRoiReport {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set('Content-Type', 'application/json');
+  if (isCognitoConfigured()) {
+    const accessToken = await getCognitoAccessToken();
+    if (!accessToken) {
+      throw new Error('Your sign-in session has expired. Sign in again to continue.');
+    }
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    headers,
   });
   const responseText = await response.text();
   let body: unknown;
