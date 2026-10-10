@@ -46,6 +46,26 @@ test("rejects a model attempt to override the deterministic recommendation", () 
   assert.equal(result.recommended_action, "RE_MATCH");
 });
 
+test("logs only validation rule and field names when model output is rejected", () => {
+  const originalWarn = console.warn;
+  const lines: string[] = [];
+  console.warn = (message?: unknown) => { lines.push(String(message)); };
+  try {
+    const result = validateModelOutput({
+      recommended_action: "RETURN",
+      evidence_keys: ["candidates"],
+      private_customer_detail: "must-not-be-logged",
+    }, snapshot, "test");
+    assert.equal(result.status, "INSUFFICIENT_DATA");
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(lines, [
+    "[ai-agent] model output rejected rule=recommended_action_mismatch_or_infeasible fields=recommended_action",
+  ]);
+  assert.doesNotMatch(lines.join("\n"), /RETURN|must-not-be-logged/);
+});
+
 test("renders only backend facts even if the model supplies invented prose", () => {
   const result = validateModelOutput({
     recommended_action: "RE_MATCH", evidence_keys: ["recovery_score", "candidates"],
@@ -77,4 +97,19 @@ test("falls back after provider failure or timeout", async () => {
   const slow: LlmProvider = { name: "slow", generateJson: () => new Promise(() => {}) };
   assert.equal((await analyze(snapshot, failing)).status, "INSUFFICIENT_DATA");
   assert.equal((await analyze(snapshot, slow, 5)).status, "INSUFFICIENT_DATA");
+});
+
+test("logs a safe diagnostic when the Gemini request times out", async () => {
+  const slowGemini: LlmProvider = { name: "gemini", generateJson: () => new Promise(() => {}) };
+  const originalError = console.error;
+  const lines: string[] = [];
+  console.error = (message?: unknown) => { lines.push(String(message)); };
+  try {
+    assert.equal((await analyze(snapshot, slowGemini, 5)).status, "INSUFFICIENT_DATA");
+  } finally {
+    console.error = originalError;
+  }
+  assert.deepEqual(lines, [
+    "[ai-agent] Gemini request failed http_status=unavailable code=timeout",
+  ]);
 });

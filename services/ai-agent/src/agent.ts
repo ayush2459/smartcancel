@@ -54,13 +54,20 @@ function asStringList(value: unknown, allowed: readonly string[]): string[] {
     : [];
 }
 
+function logValidationFailure(rule: string, fields: string[]): void {
+  console.warn(`[ai-agent] model output rejected rule=${rule} fields=${fields.join(",")}`);
+}
+
 /**
  * The model can select evidence, but it cannot supply factual prose. We always render the
  * visible explanation from the validated backend snapshot. This makes a hallucinated score,
  * status, action, or environmental saving impossible to return from this component.
  */
 export function validateModelOutput(raw: unknown, snapshot: DecisionSnapshot, provider: string): GroundedAnalysis {
-  if (!raw || typeof raw !== "object") return fallback(snapshot, "INSUFFICIENT_DATA");
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    logValidationFailure("expected_object", ["response"]);
+    return fallback(snapshot, "INSUFFICIENT_DATA");
+  }
   const value = raw as Record<string, unknown>;
   const feasible = new Set(snapshot.candidates.filter((candidate) => candidate.feasible).map((candidate) => candidate.action));
   const action = value.recommended_action;
@@ -68,13 +75,19 @@ export function validateModelOutput(raw: unknown, snapshot: DecisionSnapshot, pr
 
   // The agent may explain only the backend-selected action; it cannot re-rank the backend result.
   if (!isRecoveryAction(action) || action !== snapshot.recommended_action || !feasible.has(action)) {
+    logValidationFailure("recommended_action_mismatch_or_infeasible", ["recommended_action"]);
     return fallback(snapshot, "INSUFFICIENT_DATA");
   }
   const evidence = asStringList(
     value.evidence_keys,
     allowedEvidence.filter((key) => Object.hasOwn(snapshot, key)),
   );
-  if (evidence.length === 0 || typeof value.requires_human_review !== "boolean") {
+  if (evidence.length === 0) {
+    logValidationFailure("no_allowed_evidence_keys", ["evidence_keys"]);
+    return fallback(snapshot, "INSUFFICIENT_DATA");
+  }
+  if (typeof value.requires_human_review !== "boolean") {
+    logValidationFailure("expected_boolean", ["requires_human_review"]);
     return fallback(snapshot, "INSUFFICIENT_DATA");
   }
   const grounded = fallback(snapshot);
@@ -94,7 +107,10 @@ export async function analyze(snapshot: DecisionSnapshot, provider?: LlmProvider
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Model timed out.")), timeoutMs)),
     ]);
     return validateModelOutput(raw, snapshot, provider.name);
-  } catch {
+  } catch (error) {
+    if (provider.name === "gemini" && error instanceof Error && error.message === "Model timed out.") {
+      console.error("[ai-agent] Gemini request failed http_status=unavailable code=timeout");
+    }
     // An LLM outage must never block deterministic cancellation recovery.
     return fallback(snapshot, "INSUFFICIENT_DATA");
   }
