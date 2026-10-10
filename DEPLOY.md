@@ -24,8 +24,9 @@ is run:
 
 1. **Frontend** - private S3 bucket with CloudFront Origin Access Control. CloudFront
    routes `/api*` to API Gateway and serves `/runtime-config.json` without caching.
-2. **Sign-in** - Cognito User Pool, authorization-code flow with PKCE, refresh-token
-   rotation, and no public sign-up. The browser stores tokens in cookies.
+2. **Sign-in** - Cognito Lite User Pool, authorization-code flow with PKCE,
+   refresh-token rotation, and no public sign-up. The browser stores tokens in
+   cookies. Lite is set explicitly because the default for a new pool is Essentials.
 3. **API** - API Gateway HTTP API with a JWT authorizer on every `/api` route except
    `/api/health/live`. HTTP API is the lower-cost, lower-latency choice over REST API;
    the app does not need REST-only features such as API keys, built-in caching, or WAF.
@@ -55,40 +56,73 @@ to work around a service restriction without an explicit decision.
 The largest recurring cost is the PostgreSQL database, which runs while
 provisioned even when nobody is using the app. Storage, backups, the generated
 Secrets Manager secret, CloudFront requests/egress, API requests, Lambda, Cognito,
-and CloudWatch can also contribute to cost. A complete workload-specific total
-has not been prepared yet. Avoid NAT Gateway, Application Load Balancer, and
-always-on Fargate for this first demo.
+and CloudWatch can also contribute to cost. Avoid NAT Gateway, Application Load
+Balancer, and always-on Fargate for this first demo.
 
 ### Known database compute price (Sydney)
 
 The AWS Price List API returned **USD $0.025 per hour** for an on-demand
 `db.t4g.micro`, PostgreSQL, Single-AZ RDS instance in Asia Pacific (Sydney),
 effective October 1, 2026. At 730 hours/month this is **USD $18.25/month for
-database compute alone**. Storage, backups, monitoring, and all other services
-are extra. Pricing source: [Amazon RDS for PostgreSQL pricing](https://aws.amazon.com/rds/postgresql/pricing/)
+database compute alone**. The configured 20 GB gp3 volume is about **USD
+$2.76/month**, and one Secrets Manager secret about **USD $0.40/month**. That is
+a fixed baseline of **USD $21.41/month**, before backups beyond the included
+allowance, traffic, logs, and the rest of the stack. Pricing sources:
+[Amazon RDS for PostgreSQL pricing](https://aws.amazon.com/rds/postgresql/pricing/)
 and the AWS Price List API (`AmazonRDS`, `ap-southeast-2`).
 
-You chose 24/7 availability. At that compute-only rate, the database uses about
-73% of a USD $25 monthly alert threshold before storage or any other AWS service,
-and USD $100 in credits would cover about 5.5 months before additional charges.
-Therefore do not assume the credits will last the full 183 days shown in the
-account. A monthly alert is not a hard cap. Check whether the Free plan permits
-each chosen resource before creating it.
+### Low-traffic planning scenario (not a quote or a cap)
+
+Using published AWS Price List API on-demand rates and the monthly assumptions
+below gives an illustrative total of **about USD $22.70/month**:
+
+| Component | Monthly assumption | Estimate |
+| --- | ---: | ---: |
+| RDS PostgreSQL compute | `db.t4g.micro`, 730 hours | $18.25 |
+| RDS gp3 storage | 20 GB | $2.76 |
+| Secrets Manager | 1 secret | $0.40 |
+| S3 Standard | 1 GB | $0.025 |
+| CloudFront outbound data | 10 GB delivered in India | $1.09 |
+| CloudFront HTTPS requests | 10,000 | $0.012 |
+| API Gateway HTTP API | 10,000 requests | $0.0129 |
+| Lambda | 10,000 requests, 0.5 GB, 1 second each | $0.0853 |
+| CloudWatch Logs ingestion | 0.1 GB | $0.067 |
+| Cognito Lite | 5 direct-sign-in monthly active users | $0.00 at [current first 10,000 MAU tier](https://aws.amazon.com/cognito/pricing/) |
+
+The arithmetic was calculated by script. This is a low-usage demo scenario, not
+a maximum: it excludes extra snapshots/backup storage, email/SMS, Cognito
+advanced security, traffic beyond 10 GB, CloudFront price differences for other
+viewer locations, and unusually high logs or API traffic. Confirm exact inputs
+in the [AWS Pricing Calculator](https://calculator.aws/) before provisioning.
+This estimate is not a spending cap.
+
+The account's Free Tier API reports the **Free** plan as active with **USD $100**
+credits remaining through **April 10, 2027**, and no recorded Free Tier usage yet.
+At this scenario estimate, those credits would last about **4.40 months** if
+there were no other AWS charges; compute alone would use them in about **5.48
+months**. The official [AWS Free Tier page](https://aws.amazon.com/free/) says a
+Free plan account closes when credits run out or the six-month period ends,
+unless converted to Paid. Do not assume the app will remain online for the
+whole credit period. The Free Tier usage API does not guarantee that every
+required service is eligible or usable on this specific account.
+
+You chose 24/7 database availability. The scenario is about **USD $2.30 below**
+the previously discussed USD $25 monthly alert threshold, before omitted or
+variable charges. An alert is not a cap, and it has not been verified as
+configured. Confirm service availability and account eligibility before
+bootstrapping or deploying.
 
 Before provisioning:
 
-1. Check that RDS PostgreSQL, Lambda, API Gateway, Cognito, S3, CloudFront, and
-   the required Lambda VPC networking
-   are available to this account on its current plan in `ap-southeast-2`.
-2. Build a Sydney-region estimate in the
-   [AWS Pricing Calculator](https://calculator.aws/), including RDS running
-   730 hours/month, storage and backups, Lambda, API Gateway, S3, CloudFront,
-   Cognito, Secrets Manager, and CloudWatch.
-3. Compare the estimate with the USD $100 credit balance and its expiry date.
-   Credits may be exhausted before the six-month Free plan ends.
-4. Check current Free plan spending alerts and controls. Treat notifications as
+1. Confirm service availability/eligibility for this Free plan. The plan-state
+   and usage APIs confirm active Free status and credits but do not certify
+   future eligibility for every service in the stack.
+2. Confirm or adjust the low-traffic assumptions in the
+   [AWS Pricing Calculator](https://calculator.aws/) and compare them with the
+   remaining credits and expiry date.
+3. Check current Free plan spending alerts and controls. Treat notifications as
    warnings, not a guaranteed hard spending cap.
-5. If any required service is unavailable or the estimate is unacceptable,
+4. If any required service is unavailable or the estimate is unacceptable,
    stop and choose a different plan before provisioning.
 
 ## Build, review, and deployment sequence
@@ -98,7 +132,7 @@ These commands have not been run against AWS:
 1. Build and synthesize locally with `npm run infra:synth`. This command builds
    the frontend and runs `cdk synth --strict`; it does not contact AWS to create
    resources.
-2. Review the complete estimate and account Free plan/service eligibility before
+2. Confirm the cost scenario and account Free plan/service eligibility before
    asking to bootstrap. The previous $25 alert is a notification, not a hard cap.
 3. If approved, bootstrap only `ap-southeast-2` using profile `smartcancy`.
    Bootstrap creates deployment infrastructure (including an S3 bucket, roles,

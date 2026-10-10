@@ -38,6 +38,7 @@ export class SmartCancyStack extends Stack {
 
     const userPool = new cognito.UserPool(this, 'Users', {
       userPoolName: 'smartcancy-demo-users',
+      featurePlan: cognito.FeaturePlan.LITE,
       selfSignUpEnabled: false,
       signInAliases: { email: true },
       autoVerify: { email: true },
