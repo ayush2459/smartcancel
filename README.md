@@ -15,7 +15,14 @@ Instead of treating every cancellation as an automatic return, SmartCancy evalua
 
 The endpoint above is the deployed API base URL; it is not necessarily a browser-based frontend URL. Use the configured application interface or the documented API routes to interact with the service.
 
-**Security notice:** Do not publish usernames, passwords, API keys, database credentials, tokens, or other access details in this README or in source control. If credentials have been exposed in a public repository or message, rotate/revoke them immediately and review access logs. Share access details only through an approved private channel.
+**## Demo Login
+
+**Live Demo:** https://wdu1m18nd1.execute-api.ap-southeast-2.amazonaws.com/
+
+- **Username:** `honeypriya.222005@gmail.com`
+- **Password:** `Smartuser@123`
+
+Use these credentials to access the SmartCancy demo, if the deployed application supports login at this URL.
 
 ## What SmartCancy does
 
