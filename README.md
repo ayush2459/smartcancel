@@ -1,5 +1,9 @@
 # SmartCancy — cancellation recovery and sustainable logistics
-
+Live Link:
+https://wdu1m18nd1.execute-api.ap-southeast-2.amazonaws.com/
+Credentials:
+Username = honeypriya.222005@gmail.com
+Password = Smartuser@123
 SmartCancy is a prototype for reducing waste from late order cancellations. This repository contains an interactive React/Vite simulator and a separate PostgreSQL-backed Express API for cancellation intake, recovery recommendations, human approval, simulated execution, and reports.
 
 > **Prototype boundary:** the frontend currently uses local demo data. The backend uses deterministic rule-based recommendations and illustrative estimates. Execution is simulation-only: it does not dispatch riders, reprint labels, refund payments, mutate live orders/parcels, or establish verified savings. Concept/ROI figures are projections, not measured results.
